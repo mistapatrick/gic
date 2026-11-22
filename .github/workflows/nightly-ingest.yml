@@ -1,0 +1,27 @@
+name: Nightly 2359 WAT Observed Weather Ingestion
+
+on:
+  schedule:
+    # 22:59 UTC == 23:59 WAT (GMT+1) — the last minute of the Lagos calendar
+    # day, so this run captures the full 00:00-23:59 WAT day in one pass.
+    # Vercel Hobby cron has up to a ±59-minute jitter, so this job calls the
+    # ingest endpoint directly from GitHub Actions instead, which fires at
+    # the scheduled minute.
+    - cron: "59 22 * * *"
+  workflow_dispatch: # Allows a manual trigger / backfill run from the GitHub UI
+
+jobs:
+  trigger-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel observational ingest endpoint
+        run: |
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
+            -X POST "${{ secrets.VERCEL_APP_URL }}/api/ingest" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          cat response.json
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Ingestion failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
