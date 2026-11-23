@@ -52,12 +52,30 @@ export async function POST(req: NextRequest) {
   const url = buildFaostatUrl(FAOSTAT_AREA_CODE_NIGERIA, years);
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+    // 45s, not 20s: buildFaostatUrl() deliberately omits item/element filters
+    // (see its own comment — avoids guessing an unconfirmed numeric code) and
+    // fetches everything FAOSTAT has for Nigeria across LOOKBACK_YEARS years
+    // in one request. A real production run timed out at 20s; FAOSTAT's
+    // public API can legitimately take longer than that to generate an
+    // unfiltered multi-year response. 45s leaves ~15s of the route's own
+    // 60s maxDuration for the JSON parse, Zod validation, and Supabase
+    // writes that still have to happen after this fetch returns.
+    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
   } catch (err) {
     console.error("[ingest/production-conditions] FAOSTAT request failed:", err);
     return NextResponse.json({ error: "FAOSTAT fetch failed" }, { status: 502 });
   }
   if (!res.ok) {
+    // Previously logged nothing here, so a non-2xx FAOSTAT response (as
+    // opposed to the fetch itself timing out, handled above) was a dead
+    // end to diagnose from Vercel's logs alone. Cap the body read — an
+    // error page can be arbitrarily large, and this is diagnostics, not
+    // data.
+    const bodySnippet = await res.text().then((t) => t.slice(0, 500)).catch(() => "<unreadable>");
+    console.error(
+      `[ingest/production-conditions] FAOSTAT responded with HTTP ${res.status} ${res.statusText}:`,
+      bodySnippet
+    );
     return NextResponse.json({ error: "FAOSTAT fetch failed" }, { status: 502 });
   }
 
