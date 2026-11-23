@@ -3,6 +3,8 @@ import { getCurrentUserRole, getSupabaseServerClient } from "@/lib/supabase/serv
 import { SignOutButton } from "@/components/SignOutButton";
 import { AdminAccountsPanel } from "@/components/AdminAccountsPanel";
 import { BackfillPanel } from "@/components/BackfillPanel";
+import { ManualEntryReviewPanel } from "@/components/ManualEntryReviewPanel";
+import { BACKFILL_DOMAINS } from "@/lib/ingestion/domain-adapters";
 
 export default async function AdminPage() {
   const role = await getCurrentUserRole();
@@ -34,7 +36,11 @@ export default async function AdminPage() {
         <AdminAccountsPanel initialAccounts={accounts ?? []} />
 
         <div className="mt-6">
-          <BackfillPanel />
+          <BackfillPanel domains={BACKFILL_DOMAINS} />
+        </div>
+
+        <div className="mt-6">
+          <ManualEntryReviewPanel />
         </div>
       </div>
     </main>

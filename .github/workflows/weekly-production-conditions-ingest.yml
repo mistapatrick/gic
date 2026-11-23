@@ -1,0 +1,26 @@
+name: Weekly Saturday 2359 WAT Production Conditions Ingestion
+
+on:
+  schedule:
+    # 22:59 UTC Saturday == 23:59 WAT (GMT+1) Saturday — same "call the
+    # Vercel endpoint directly from GitHub Actions" pattern as
+    # nightly-ingest.yml, for the same reason: Vercel Hobby cron's jitter
+    # (up to ±59 minutes) isn't precise enough for a fixed weekly slot.
+    - cron: "59 22 * * 6"
+  workflow_dispatch: # Manual trigger from the GitHub UI
+
+jobs:
+  trigger-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel production-conditions ingest endpoint
+        run: |
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
+            -X POST "${{ secrets.VERCEL_APP_URL }}/api/ingest/production-conditions" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          cat response.json
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Ingestion failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi

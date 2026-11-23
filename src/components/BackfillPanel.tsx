@@ -23,8 +23,8 @@ interface BackfillJobState {
  * is persisted server-side after every chunk, not just when this tab is
  * open.
  */
-export function BackfillPanel() {
-  const [domain] = useState("weather");
+export function BackfillPanel({ domains }: { domains: string[] }) {
+  const [domain, setDomain] = useState(domains[0] ?? "weather");
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [job, setJob] = useState<BackfillJobState | null>(null);
@@ -87,6 +87,24 @@ export function BackfillPanel() {
       </p>
 
       <form onSubmit={handleRunUntilDone} className="mt-4 flex flex-wrap items-end gap-3">
+        <div>
+          <label className="block text-sm font-medium text-brand-ink-soft" htmlFor="backfill-domain">
+            Domain
+          </label>
+          <select
+            id="backfill-domain"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            disabled={running}
+            className="mt-1 rounded-md border border-brand-grey-green px-3 py-2 text-brand-ink focus:border-brand-teal focus:outline-none"
+          >
+            {domains.map((d) => (
+              <option key={d} value={d}>
+                {d.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="block text-sm font-medium text-brand-ink-soft" htmlFor="range-start">
             From

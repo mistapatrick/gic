@@ -1,0 +1,26 @@
+name: Weekly Sunday 0059 WAT Commodity Prices (World Bank RTFP) Ingestion
+
+on:
+  schedule:
+    # 23:59 UTC Saturday == 00:59 WAT (GMT+1) Sunday — offset by an hour
+    # from the NBS and production-conditions crons (both 22:59 UTC
+    # Saturday) so the three weekly jobs don't all hit Vercel in the same
+    # minute; each domain's cron is still fully independent either way.
+    - cron: "59 23 * * 6"
+  workflow_dispatch: # Manual trigger from the GitHub UI
+
+jobs:
+  trigger-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel commodity-prices-worldbank-rtfp ingest endpoint
+        run: |
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
+            -X POST "${{ secrets.VERCEL_APP_URL }}/api/ingest/commodity-prices-worldbank-rtfp" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          cat response.json
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Ingestion failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi

@@ -91,16 +91,56 @@ synoptic station telemetry. Phrase claims to funders/clients as
 - **Security headers** including a nonce-based Content-Security-Policy —
   see `SECURITY.md` for how and why.
 
+**Production conditions & commodity prices (Sub-phase 2):**
+
+- **Production conditions** — FAOSTAT crop/livestock production, yield, and
+  area-harvested figures for Nigeria, ingested automatically (annually, via
+  a weekly cron that mostly no-ops between FAOSTAT's own release windows —
+  see `src/lib/domains/production-conditions/`). Historical backfill
+  reuses the same framework as weather, chunked in multi-year spans.
+- **Commodity prices** — scoped to automate all three sources originally
+  named (AFEX, World Bank RTFP, NBS) alongside FAOSTAT, and to average
+  across agencies rather than pick one. After checking each source's
+  real-world access method a second time: **NBS's Selected Food Price
+  Watch and World Bank RTFP are now automated**, each via its own weekly
+  cron and a dedicated `commodity_price_observations` table, alongside
+  FAOSTAT's existing production-conditions figures — see
+  `src/lib/domains/commodity-prices/`. **AFEX stays manual-entry.** AFEX
+  has no official API or documented feed anywhere — only undocumented
+  internal endpoints or third-party aggregators — so a scoped `data_entry`
+  account still types in AFEX observations (commodity, market, price,
+  unit) from `/dashboard`, a `super_admin` reviews and publishes or
+  rejects them from `/admin`, and only published entries reach the
+  public dashboard. See `src/lib/domains/manual-entries/` — a generic
+  framework any future manual-entry domain reuses, not specific to
+  prices.
+- **Cross-agency reconciliation** — `reconcileCommodityPrices()` in
+  `src/lib/domains/commodity-prices/price-types.ts` groups observations
+  by commodity + price type + unit + currency + region, takes each
+  source's single latest observation within a group, and averages only
+  when two or more sources land in the same group. NBS and World Bank
+  RTFP both report retail/household prices, so they average together;
+  AFEX is an **exchange spot price** for a traded contract — a
+  structurally different measurement — and is deliberately never
+  averaged with the retail figures, even for the same commodity. The
+  `CommodityPricesCard` on the public dashboard shows each source's own
+  figure alongside the average, so the distinction stays visible rather
+  than getting blended away.
+- Both new domains are hidden behind their own `feature_flags` row
+  (`production_conditions`, `commodity_prices`), both seeded `false` —
+  flip them on in Supabase once you've verified a real ingest/entry flow
+  in your own deployment (see Step 7 below).
+
 ## Roadmap (deliberately deferred, not in this build)
 
-- **Market-price crossing** (pairing weather risk flags with Nigerian grain
-  prices) — the real moat identified in product review, but genuinely
-  harder: no live price API exists; the realistic path is a periodic pull
-  from a published dataset (e.g. World Bank Real Time Food Prices, NBS High
-  Frequency Prices), ingested on a weekly/monthly cadence.
+- **Automating AFEX spot pricing** — a deliberate decision, not a gap:
+  AFEX has no official API or documented feed anywhere (see "Production
+  conditions & commodity prices" above). Revisit if AFEX ever publishes
+  one, or if a paid/registered-key third-party aggregator becomes worth
+  the operational cost.
 - **Scraping prices from online marketplaces (e.g. Jiji)** — explicitly
-  ruled out. Input pricing for Phase 1's `input_pricing` domain is manual
-  data entry by a scoped `data_entry` account, not scraping.
+  ruled out. Manual data entry by a scoped `data_entry` account is the
+  chosen path for anything that can't be machine-ingested, not scraping.
 - **Multi-day streak detection** (e.g. "3 consecutive drying-risk days") —
   the risk-flag engine currently looks at one elapsed day at a time.
 - **Public push channels** (Telegram, WhatsApp) — a real option if/when a
@@ -113,40 +153,62 @@ and the automated test suite that exercises them.
 
 ```
 growthly-gic/
-├── .github/workflows/nightly-ingest.yml     # Exact 23:59 WAT cron trigger
+├── .github/workflows/
+│   ├── nightly-ingest.yml                   # Exact 23:59 WAT weather cron trigger
+│   ├── weekly-production-conditions-ingest.yml # Saturday 23:59 WAT FAOSTAT cron trigger
+│   ├── weekly-commodity-prices-nbs-ingest.yml # Saturday 23:59 WAT NBS cron trigger
+│   └── weekly-commodity-prices-worldbank-rtfp-ingest.yml
+│                                             # Saturday 00:59 WAT World Bank RTFP cron trigger
 ├── supabase/
 │   ├── schema.sql                           # weather_clusters, observed_hourly,
 │   │                                         # daily_observed_reports — public read-only
 │   └── migrations/
 │       ├── 0001_full_day_ingest_cutoff.sql  # cutoff_hour_wat up to 23
 │       ├── 0002_auth_roles_audit.sql        # user_roles, audit_log, feature_flags, RLS
-│       └── 0003_backfill_jobs.sql           # backfill_jobs — resumable job checkpoints
+│       ├── 0003_backfill_jobs.sql           # backfill_jobs — resumable job checkpoints
+│       ├── 0004_production_conditions_and_manual_entries.sql
+│       │                                     # production_conditions (FAOSTAT, public read-only)
+│       │                                     # + manual_data_entries (generic, status-gated)
+│       └── 0005_commodity_price_observations.sql
+│                                             # commodity_price_observations (NBS + World Bank
+│                                             # RTFP, public read-only) — AFEX stays on
+│                                             # manual_data_entries, unchanged
 ├── scripts/
 │   └── seed-super-admin.ts                  # One-time: create the first super_admin
 ├── src/
 │   ├── proxy.ts                             # CSP nonce + session refresh + role gating
 │   ├── middleware config: see proxy.ts's own `config.matcher`
 │   ├── app/
-│   │   ├── page.tsx, layout.tsx             # Public dashboard
+│   │   ├── page.tsx, layout.tsx             # Public dashboard (weather + Sub-phase 2 cards)
 │   │   ├── login/page.tsx                   # Email+password sign-in
-│   │   ├── dashboard/page.tsx               # Post-login landing (data_entry accounts)
-│   │   ├── admin/page.tsx                   # Account management + backfill (super_admin)
+│   │   ├── dashboard/page.tsx               # Post-login landing + manual-entry forms (data_entry)
+│   │   ├── admin/page.tsx                   # Accounts + backfill + entry review (super_admin)
 │   │   └── api/
 │   │       ├── ingest/route.ts              # Nightly: Open-Meteo -> flags -> Gemini -> Supabase
+│   │       ├── ingest/production-conditions/route.ts # Weekly: FAOSTAT -> Supabase
+│   │       ├── ingest/commodity-prices-nbs/route.ts  # Weekly: NBS zip/xlsx -> Supabase
+│   │       ├── ingest/commodity-prices-worldbank-rtfp/route.ts
+│   │       │                                # Weekly: World Bank RTFP CSV -> Supabase
 │   │       ├── chat/route.ts                # "Ask the analyst" Q&A endpoint
 │   │       ├── export/route.ts              # Public CSV/XLSX telemetry export
 │   │       ├── brief-card/[slug]/route.tsx  # Branded PNG briefing card (next/og)
+│   │       ├── manual-entries/route.ts      # Submit (data_entry) / list (own or all)
+│   │       ├── manual-entries/[id]/route.ts # Publish/reject a pending entry (super_admin)
 │   │       └── admin/
 │   │           ├── accounts/route.ts        # Invite/list data-entry accounts (super_admin)
 │   │           ├── accounts/[userId]/route.ts # Activate/deactivate an account
-│   │           └── backfill/route.ts        # Start/resume a historical-backfill job
+│   │           └── backfill/route.ts        # Start/resume a historical-backfill job (any domain)
 │   ├── components/                          # GicLogo, GicDashboard, AgentBriefPanel,
 │   │                                         # LoginForm, SignOutButton, AdminAccountsPanel,
-│   │                                         # BackfillPanel, ExportPanel
+│   │                                         # BackfillPanel, ExportPanel,
+│   │                                         # ProductionConditionsCard, CommodityPricesCard,
+│   │                                         # CommodityPriceEntryForm, ManualEntryReviewPanel,
+│   │                                         # DomainCardErrorBoundary
 │   ├── hooks/use-analyst-chat.ts
 │   └── lib/
 │       ├── env.server.ts                    # Validated server-only env access
 │       ├── ai-models.ts                     # Gemini fallback chain
+│       ├── feature-flags.ts                 # Public feature_flags lookup (client-safe)
 │       ├── paginate.ts, rate-limit.ts, timing-safe.ts, types.ts
 │       ├── supabase/
 │       │   ├── admin.ts                     # service_role client — bypasses RLS
@@ -154,16 +216,28 @@ growthly-gic/
 │       │   ├── server.ts                    # SSR, cookie-aware — Server Components/routes
 │       │   └── browser.ts                   # SSR, cookie-aware — browser sign-in/out
 │       ├── auth/
-│       │   ├── cron-auth.ts                 # /api/ingest bearer-token check (unrelated to
-│       │   │                                # human accounts — predates this auth system)
+│       │   ├── cron-auth.ts                 # bearer-token check, shared by both ingest crons
 │       │   ├── accounts-logic.ts            # Validation + the mass-assignment guard
 │       │   └── audit.ts                     # Append-only audit_log writer
 │       ├── domains/
 │       │   ├── registry.ts                  # The fixed list of data-entry domains
-│       │   └── weather/
-│       │       ├── ingest-logic.ts          # Steady-state nightly parsing + risk flags
-│       │       ├── chat-logic.ts, export-logic.ts
-│       │       └── backfill.ts              # Historical pull, reuses ingest-logic.ts
+│       │   ├── weather/
+│       │   │   ├── ingest-logic.ts          # Steady-state nightly parsing + risk flags
+│       │   │   ├── chat-logic.ts, export-logic.ts
+│       │   │   └── backfill.ts              # Historical pull, reuses ingest-logic.ts
+│       │   ├── production-conditions/
+│       │   │   ├── ingest-logic.ts          # FAOSTAT parsing + defensive Area-code validation
+│       │   │   └── backfill.ts              # Historical pull, enumerateYears() chunking
+│       │   ├── commodity-prices/
+│       │   │   ├── entry-schema.ts          # Zod payload shape for one manual (AFEX) entry
+│       │   │   ├── price-types.ts           # Shared types + reconcileCommodityPrices() averaging
+│       │   │   ├── nbs-ingest-logic.ts      # NBS xlsx/catalog parsing (pure)
+│       │   │   ├── nbs-backfill.ts          # NBS zip download + extraction + Supabase write
+│       │   │   ├── worldbank-rtfp-ingest-logic.ts # World Bank RTFP CSV/catalog parsing (pure)
+│       │   │   └── worldbank-rtfp-backfill.ts     # World Bank RTFP CSV download + Supabase write
+│       │   └── manual-entries/
+│       │       ├── registry.ts              # domain -> payload-schema map
+│       │       └── submission.ts            # Generic submission validation (any domain)
 │       └── ingestion/
 │           ├── backfill-framework.ts        # Generic resumable/rate-limited job runner
 │           ├── backfill-request.ts          # Validation for starting a backfill job
@@ -193,6 +267,15 @@ growthly-gic/
    4. [`supabase/migrations/0003_backfill_jobs.sql`](./supabase/migrations/0003_backfill_jobs.sql)
       — adds `backfill_jobs`. Needed before using the historical-backfill
       panel.
+   5. [`supabase/migrations/0004_production_conditions_and_manual_entries.sql`](./supabase/migrations/0004_production_conditions_and_manual_entries.sql)
+      — adds `production_conditions` (FAOSTAT, public read-only) and the
+      generic `manual_data_entries` table (AFEX's manual-entry use), plus
+      their two `feature_flags` rows (seeded `false`). Needed before
+      Step 7 below.
+   6. [`supabase/migrations/0005_commodity_price_observations.sql`](./supabase/migrations/0005_commodity_price_observations.sql)
+      — adds `commodity_price_observations` (NBS + World Bank RTFP, public
+      read-only). AFEX stays on `manual_data_entries` from migration 0004 —
+      no schema change needed for it. Needed before Step 7 below.
 3. **Authentication → Providers**: confirm Email is enabled (it is by
    default). **Authentication → URL Configuration**: set the Site URL to
    your eventual production domain once you have it (Step 4).
@@ -287,6 +370,57 @@ start a historical backfill.
    Ingestion** → **Run workflow** to populate today's telemetry immediately.
    From then on it runs automatically every night at 22:59 UTC (23:59 WAT).
 
+### Step 7 — Activate production conditions & commodity prices (Sub-phase 2)
+
+No new secrets needed — the new weekly crons all reuse the same
+`VERCEL_APP_URL`/`CRON_SECRET` GitHub Actions secrets from Step 6.
+
+1. Go to the **Actions** tab → **Weekly Saturday 2359 WAT Production
+   Conditions Ingestion** → **Run workflow** to pull FAOSTAT's current
+   figures immediately. From then on it runs automatically every Saturday
+   at 22:59 UTC (23:59 WAT) — most runs will find nothing new, since
+   FAOSTAT publishes annually, not weekly; that's expected, not a bug.
+2. Do the same for **Weekly Commodity Prices NBS Ingestion** (Saturday
+   22:59 UTC / 23:59 WAT) and **Weekly Commodity Prices World Bank RTFP
+   Ingestion** (Saturday 23:59 UTC / 00:59 WAT, offset by an hour from the
+   other two Saturday crons so they don't contend for the same Vercel
+   Hobby invocation window).
+3. On `/admin`, use the **Historical backfill** panel's domain selector to
+   run `production_conditions`, `commodity_prices_nbs`, and
+   `commodity_prices_worldbank_rtfp` backfills over as much past history
+   as each source has — the same "Run until done" flow as weather, just
+   chunked differently per domain: `production_conditions` in multi-year
+   spans (FAOSTAT publishes annually), `commodity_prices_nbs` in
+   multi-month spans against its monthly catalog, and
+   `commodity_prices_worldbank_rtfp` with no date range at all — World
+   Bank RTFP publishes Nigeria's entire 2007-to-present history in one
+   CSV re-released under a new filename roughly weekly, so every backfill
+   tick just re-fetches the current file (any date range you pick is
+   accepted but ignored for that one domain).
+4. **Before flipping either flag on, confirm each first live run actually
+   wrote rows in the expected shape** — this build environment's own
+   outbound network allowlist blocks direct access to
+   `nigerianstat.gov.ng` and `worldbank.org` (confirmed by a direct `curl`
+   test: `403` on the `CONNECT` tunnel), so none of the three new
+   ingestors' exact live response shapes were verified from here. All
+   three throw a loud, specific error instead of silently writing nothing
+   if they get back an HTML login/terms wall instead of the expected ZIP,
+   xlsx, or CSV — see `SECURITY.md` §16 (FAOSTAT) and the new §18/§19
+   (NBS / World Bank RTFP) for what each one checks and what the error
+   messages mean if you see them in Vercel's function logs on a real run.
+5. Once verified, flip `production_conditions` and `commodity_prices` to
+   `enabled = true` in Supabase's **Table Editor → feature_flags** (or via
+   SQL) to make the public dashboard cards appear. `commodity_prices`
+   covers all three sources (NBS, World Bank RTFP, and AFEX) under one
+   flag and one dashboard card — there's no separate flag per source.
+6. AFEX still has no automated ingest to run — it remains the one
+   manual-entry source (see "What's in it" above). Invite a `data_entry`
+   account scoped to `commodity_prices` (below), have them submit a few
+   AFEX entries from `/dashboard`, review and publish them from `/admin`,
+   and they'll show up on the dashboard card alongside the automated
+   NBS/World Bank RTFP figures — averaged with each other, never with
+   AFEX's exchange-spot price (see "What's in it" above for why).
+
 ## Accounts, roles & admin
 
 There is no self-service sign-up. Two roles exist:
@@ -300,15 +434,25 @@ There is no self-service sign-up. Two roles exist:
   historical backfills.
 - **`data_entry`** — created only by a super admin, from `/admin`, scoped to
   one or more data domains (`input_pricing`, `crop_pest_tracking`,
-  `livestock_outbreak_tracking` — see `src/lib/domains/registry.ts`).
-  Inviting one sends a Supabase Auth invite email with a link to set a
-  password; no password ever passes through this app's own server. A
-  `data_entry` account signs in at `/login` and lands on `/dashboard`, which
-  shows which domain(s) it's scoped to.
+  `livestock_outbreak_tracking`, and — new in Sub-phase 2 —
+  `commodity_prices`; see `src/lib/domains/registry.ts`). Inviting one
+  sends a Supabase Auth invite email with a link to set a password; no
+  password ever passes through this app's own server. A `data_entry`
+  account signs in at `/login` and lands on `/dashboard`, which shows
+  which domain(s) it's scoped to.
 
-The manual-entry forms themselves (for `input_pricing`, etc.) don't exist
-yet — those domains are future sub-phase work. `/dashboard` is the real,
-working landing point they'll be added into, not a placeholder.
+`commodity_prices` is the first domain with a real manual-entry form: a
+`data_entry` account scoped to it sees a submission form on `/dashboard`
+for AFEX observations specifically (NBS and World Bank RTFP are now
+automated — see "What's in it" above — so the manual form only ever
+needs to cover the one source with no API) and their own submission
+history with each entry's review status (pending/published/rejected).
+`input_pricing` and `crop_pest_tracking` still have no form yet — those
+remain future sub-phase work; a staffer scoped only to those still sees
+the "nothing to do yet" placeholder. Every submission lands `pending`; a
+`super_admin` reviews it from `/admin`'s **Pending manual entries** panel
+before it reaches the public dashboard — see `SECURITY.md` §17 for the
+full authorization model.
 
 Every account-management action (invite, activate, deactivate) writes a row
 to the append-only `audit_log` table — see `SECURITY.md`.
@@ -316,19 +460,38 @@ to the append-only `audit_log` table — see `SECURITY.md`.
 ## Historical backfill
 
 Before GIC's own nightly telemetry has accumulated any real history,
-`/admin`'s "Historical backfill" panel pulls in past weather data from
-Open-Meteo's historical archive API, so the dashboard isn't starting from a
-blank slate. Pick a past date range and click **Run until done** — it
-fetches and writes a few weeks at a time, persisting progress after every
-chunk, so it's safe to close the tab and come back later; clicking **Run
-until done** again on the same range resumes exactly where it left off.
+`/admin`'s "Historical backfill" panel pulls in past data from an
+upstream historical source, so the dashboard isn't starting from a blank
+slate. Pick a **domain** — `weather`, `production_conditions`, or, new in
+this rework, `commodity_prices_nbs` and `commodity_prices_worldbank_rtfp`
+— and a past date range, then click **Run until done** — it fetches and
+writes a chunk at a time, persisting progress after every chunk, so it's
+safe to close the tab and come back later; clicking **Run until done**
+again on the same range resumes exactly where it left off. `weather`
+chunks in weeks (Open-Meteo's historical archive API);
+`production_conditions` chunks in multi-year spans (FAOSTAT publishes
+annually, not daily); `commodity_prices_nbs` chunks in multi-month spans
+against NBS's monthly catalog; `commodity_prices_worldbank_rtfp` ignores
+the date span entirely and always re-fetches the one current whole-history
+CSV, since World Bank RTFP publishes no narrower request than that — the
+panel's chunk size is picked for you either way, you only choose the
+domain and date range. (AFEX has no historical source to backfill — it's
+manual-entry only, see "Accounts, roles & admin" above.)
 
 This is built as a generic framework (`src/lib/ingestion/`), not something
-wired specifically to weather — a later sub-phase's domain (once it has its
-own historical source to backfill from) registers an adapter in
-`src/lib/ingestion/domain-adapters.ts` and gets the same resumable,
-rate-limited runner for free. See `SECURITY.md` for the authorization and
-rate-limiting details.
+wired specifically to weather — `production_conditions`,
+`commodity_prices_nbs`, and `commodity_prices_worldbank_rtfp` are all
+proof that a new domain really does plug in without changing the
+framework itself: each only needed a new `src/lib/ingestion/
+domain-adapters.ts` registry entry and its own `fetchChunk`/`writeChunk`
+pair reinterpreting the generic date-span chunking in whatever way fits
+that source (`enumerateYears()` for FAOSTAT, "which catalog months fall
+in this range" for NBS, and "ignore the range, there's only ever one
+file" for World Bank RTFP — TypeScript's structural typing allows that
+last one's zero-parameter `fetchChunk` to satisfy the framework's wider
+`(start, end) => Promise<unknown>` interface unchanged). A future domain
+with its own historical source does the same. See `SECURITY.md` for the
+authorization and rate-limiting details.
 
 ## Troubleshooting
 
@@ -388,6 +551,23 @@ regardless of how many rows match the filter. `src/lib/paginate.ts`'s
 cap; `tests/paginate.test.ts` covers the page-boundary logic directly. If an
 export still looks truncated, check first whether the underlying data simply
 doesn't exist yet for the missing dates.
+
+**`/api/ingest/commodity-prices-nbs` or `/api/ingest/commodity-prices-worldbank-rtfp`
+returns 502 with an error mentioning "HTML" or "login/terms wall" instead
+of the expected file format** — Both ingestors deliberately throw instead
+of silently parsing garbage when the response isn't the ZIP (NBS) or CSV
+(World Bank RTFP) they expect, because neither source's exact live
+response shape could be confirmed from this build environment (its own
+outbound network allowlist blocks `nigerianstat.gov.ng` and
+`worldbank.org` directly — see `SECURITY.md` §18/§19). This means the
+real-world catalog page is gating the download behind a login, a terms
+click-through, or a changed URL structure that the regex-based link
+finders in `nbs-ingest-logic.ts` / `worldbank-rtfp-ingest-logic.ts` no
+longer match. Open the catalog URL in a browser
+(`https://microdata.nigerianstat.gov.ng/index.php/catalog/162` or
+`https://microdata.worldbank.org/index.php/catalog/4503`) from a real
+network, see what's actually gating it, and adjust the matching
+function accordingly.
 
 **A historical-backfill job's status is stuck on "running" and progress
 seems to have stopped** — "running" (not "completed" or "failed") just

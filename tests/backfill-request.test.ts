@@ -71,4 +71,28 @@ describe("validateStartBackfillInput", () => {
     expect(result.ok).toBe(true);
     expect(result.data?.chunkSizeDays).toBe(14);
   });
+
+  it("accepts a multi-year chunkSizeDays for an annual-granularity domain", () => {
+    // The cap was raised from 31 to 3650 in Sub-phase 2 specifically so
+    // production_conditions (FAOSTAT, annual) can chunk efficiently — see
+    // backfill-request.ts's comment on StartBackfillSchema.
+    const result = validateStartBackfillInput({
+      domain: "production_conditions",
+      rangeStart: "1990-01-01",
+      rangeEnd: "2025-12-31",
+      chunkSizeDays: 3650,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data?.chunkSizeDays).toBe(3650);
+  });
+
+  it("still rejects a chunkSizeDays beyond the new upper bound", () => {
+    const result = validateStartBackfillInput({
+      domain: "production_conditions",
+      rangeStart: "1990-01-01",
+      rangeEnd: "2025-12-31",
+      chunkSizeDays: 99_999,
+    });
+    expect(result.ok).toBe(false);
+  });
 });

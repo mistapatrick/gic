@@ -7,7 +7,19 @@ export const StartBackfillSchema = z.object({
   domain: z.enum(BACKFILL_DOMAINS as [string, ...string[]]),
   rangeStart: DateString,
   rangeEnd: DateString,
-  chunkSizeDays: z.number().int().min(1).max(31).optional().default(7),
+  // Upper bound raised from 31 (Sub-phase 1, daily-granularity weather only)
+  // to 3650 (~10 years) in Sub-phase 2: production_conditions is an
+  // annual-granularity domain (FAOSTAT publishes once a year), and the
+  // generic date-based backfill framework is reused unchanged for it via
+  // an enumerateYears() helper that reads whatever date span a chunk
+  // covers as "which calendar years does this span" — see
+  // src/lib/domains/production-conditions/backfill.ts. A multi-decade
+  // historical pull chunked at the old 31-day cap would mean one FAOSTAT
+  // API call roughly every month of calendar-span instead of every ~decade,
+  // which is both slower and needlessly chatty against a free public API.
+  // Still an explicit bound (not unlimited) so a single chunk can't be
+  // asked to cover an unbounded range in one request.
+  chunkSizeDays: z.number().int().min(1).max(3650).optional().default(7),
 });
 
 export type StartBackfillInput = z.infer<typeof StartBackfillSchema>;

@@ -4,17 +4,22 @@ GIC now handles real user accounts (super admin + scoped data-entry
 personnel) in addition to the public, account-less weather dashboard. The
 trust boundaries this document covers: (1) a bearer secret from the nightly
 GitHub Actions cron, (2) free-text messages typed into the "Ask the
-analyst" chat drawer, (3) third-party JSON from the Open-Meteo and Gemini
-APIs, (4) date-range/format query parameters on the public CSV/Excel export
-endpoint, (5) human sign-in and session handling via Supabase Auth, (6) the
-account-management and historical-backfill surfaces reachable only by a
-signed-in `super_admin`, and (7) every response this app sends to a
-browser, via security headers. This document states the threat model for
-each boundary, what was built to close it, and which automated test proves
-the closure holds — not just that the code "should" be safe by construction.
+analyst" chat drawer, (3) third-party responses from the Open-Meteo,
+Gemini, and (as of Sub-phase 2) FAOSTAT, NBS, and World Bank RTFP APIs —
+JSON, zipped xlsx, and CSV respectively, (4) date-range/format query
+parameters on the public CSV/Excel export endpoint, (5) human sign-in and
+session handling via Supabase Auth, (6) the account-management and
+historical-backfill surfaces reachable only by a signed-in `super_admin`,
+(7) every response this app sends to a browser, via security headers, and
+(8) a `data_entry` account's own manual-entry submissions (Sub-phase 2;
+now AFEX only — see §17), which are untrusted human input even though
+they come from an authenticated, domain-scoped account. This document
+states the threat model for each boundary, what was built to close it,
+and which automated test proves the closure holds — not just that the
+code "should" be safe by construction.
 
 Run the full suite with `npm run test` (or `npx vitest run`). Current state:
-**13 test files, 153 tests, all passing.**
+**18 test files, 217 tests, all passing.**
 
 `/api/brief-card/[slug]` (the branded PNG export used for bids and client
 briefings) is intentionally public and unauthenticated: it reads the exact
@@ -552,12 +557,16 @@ archive API or balloon Supabase writes.
   the proxy alone" pattern), on top of the proxy's own gate.
 - **Bounded, validated input.** `validateStartBackfillInput()`
   (`src/lib/ingestion/backfill-request.ts`) restricts `domain` to the fixed
-  set of registered adapters (`BACKFILL_DOMAINS`, currently just
-  `"weather"` — an unregistered domain name is rejected before any fetch
-  happens), requires `rangeStart <= rangeEnd`, requires `rangeEnd` to be
-  strictly in the past (backfill is for historical dates only — the
-  steady-state `/api/ingest` cron owns anything from today), and clamps
-  `chunkSizeDays` to 1-31.
+  set of registered adapters (`BACKFILL_DOMAINS` — `"weather"` and, as of
+  Sub-phase 2, `"production_conditions"`; an unregistered domain name is
+  rejected before any fetch happens), requires `rangeStart <= rangeEnd`,
+  requires `rangeEnd` to be strictly in the past (backfill is for
+  historical dates only — the steady-state `/api/ingest*` crons own
+  anything from today), and clamps `chunkSizeDays` to 1-3650 (raised from
+  1-31 in Sub-phase 2 specifically for `production_conditions`, an
+  annual-granularity domain chunked in multi-year spans — still an
+  explicit upper bound, not unlimited, so one chunk can't be asked to
+  cover an unbounded range).
 - **Resumable, time-boxed execution.** `runBackfillTick()`
   (`src/lib/ingestion/backfill-framework.ts`) processes chunks only until a
   ~45-second time budget is spent (comfortably inside Vercel's 60s
@@ -602,6 +611,309 @@ including the unknown-domain and future-date rejections.
 correct date enumeration, the archive (not forecast) endpoint being used,
 one daily report + 24 hourly rows produced per day in a chunk, and a date
 with no returned data being skipped rather than written as an empty report.
+
+## 16. Untrusted FAOSTAT responses + the unconfirmed-area-code risk
+
+**Threat.** `production_conditions` (Sub-phase 2) ingests from FAOSTAT, a
+third-party public API, the same class of risk as §8 (Open-Meteo/Gemini).
+A FAOSTAT-specific second risk sits on top of that: Nigeria's exact
+FAOSTAT legacy area code could not be independently confirmed against a
+live API response from this build environment (the verification request
+was blocked by FAOSTAT's own robots restrictions). Trusting an unconfirmed
+numeric code silently would risk mis-filing another country's production
+data as Nigeria's — a wrong-but-plausible-looking dataset is worse than an
+obviously broken one, because nothing would visibly fail.
+
+**Mitigation.**
+- `FaostatResponseSchema`/`FaostatRecordSchema` (Zod,
+  `src/lib/domains/production-conditions/ingest-logic.ts`) validate the
+  upstream shape before any value is used, same pattern as
+  `OpenMeteoResponseSchema` in §8.
+- `FAOSTAT_AREA_CODE_NIGERIA` is documented in code as "best candidate,
+  confirm on first live run," never as verified.
+- `parseFaostatRecords()` defensively checks every returned record's own
+  human-readable `Area` field actually equals "Nigeria" — not just trusting
+  that the `area` query parameter did what it was expected to. A mismatch
+  **throws**, failing the ingest run loudly (a `500` from the route, a
+  `"failed"` backfill job with the error recorded) rather than silently
+  writing wrong data. An empty result set (a year not yet released) is
+  explicitly *not* treated as an error.
+- Item and element codes are sidestepped entirely rather than guessed:
+  `buildFaostatUrl()` omits `item`/`element` query parameters and fetches
+  everything FAOSTAT returns for Nigeria in the requested years, then
+  `matchCommodity()`/`matchMetric()` filter by the response's own
+  human-readable name strings against `TRACKED_COMMODITIES`/
+  `ELEMENT_METRIC_RULES` — removing a second unconfirmed-numeric-code risk
+  the same way, rather than trading it for a third one.
+
+**Proof.** `tests/production-conditions-ingest-logic.test.ts` covers: a
+valid Nigeria record parses correctly; a record whose `Area` is anything
+other than "Nigeria" throws; an empty response returns `[]` without
+throwing; a record naming an untracked item or element is silently
+skipped, not written; a `null` (not-yet-published) `Value` is skipped; and
+a malformed response shape throws via the Zod schema.
+
+## 17. Manual-entry review gate (AFEX commodity prices and future domains)
+
+**Threat.** Sub-phase 2 scoped `commodity_prices` to automate all three
+originally-named sources (AFEX, World Bank RTFP, NBS); researching each
+source's real-world access, twice, found that NBS and World Bank RTFP are
+genuinely automatable (now covered by §18/§19 below) but AFEX has no
+official API or documented feed anywhere — only undocumented internal
+endpoints or third-party aggregators (see
+`claude/gic-phase-1-build-plan.md`). AFEX therefore stays on the
+manual-entry design: a human `data_entry` account typing figures into a
+form. This introduces a threat `production_conditions`/weather/NBS/World
+Bank RTFP don't have: the figures themselves are untrusted **human**
+input, not a validated third-party API response, and a compromised or
+careless data-entry session must not be able to publish unreviewed
+numbers directly to the public dashboard, submit on another account's
+behalf, or write into a domain it isn't scoped to.
+
+**Mitigation — layered, same philosophy as §11.**
+- **Payload validation per domain.** `manual_data_entries.payload` is an
+  untyped `jsonb` column by design (`supabase/migrations/
+  0004_production_conditions_and_manual_entries.sql`); every domain's
+  actual shape is enforced by Zod *before* insert
+  (`CommodityPriceEntryPayloadSchema`,
+  `src/lib/domains/commodity-prices/entry-schema.ts`, via
+  `validateManualEntrySubmission()` in
+  `src/lib/domains/manual-entries/submission.ts`) — a malformed or
+  negative-price submission never reaches the database at all.
+- **Database layer (the authoritative one).** The insert RLS policy's
+  `with check` requires all three of: `status = 'pending'`,
+  `entered_by = auth.uid()`, and `has_domain_scope(domain)` — so even a
+  modified client request cannot submit a pre-published entry, submit as
+  someone else, or write into an unscoped domain, regardless of what the
+  route handler intended to insert. Only `is_super_admin()` may `update` a
+  row (the publish/reject action); there is no delete policy for anyone,
+  matching `audit_log`/`backfill_jobs` (§13) — a rejected entry stays a
+  visible, append-only rejected row, never erased.
+- **Route-handler layer (re-checks, never trusts RLS alone).**
+  `POST /api/manual-entries` independently checks `role.role ===
+  "data_entry"` and `role.domainScope.includes(domain)` before ever
+  issuing the insert — the same "defense in depth, not a replacement" note
+  from §11 applied here. `src/proxy.ts`'s `PROTECTED_API_PREFIXES` was
+  extended to include `/api/manual-entries`, so an unauthenticated or
+  deactivated caller never reaches this route's own checks at all — but
+  unlike `/api/admin`, it is *not* restricted to `super_admin` only at the
+  proxy layer, since both roles legitimately use it (submit vs. review).
+- **Publication gate.** The public dashboard card
+  (`src/components/CommodityPricesCard.tsx`) and the public anon-key RLS
+  policy both only ever expose `status = 'published'` rows — a `pending`
+  or `rejected` entry is visible only to its own submitter and to
+  `super_admin` (two further, separately-named `select` policies on the
+  same table), never to an anonymous visitor, until a `super_admin`
+  explicitly reviews it via `PATCH /api/manual-entries/[id]`.
+- **Re-review guard.** The review route's update query is scoped with
+  `.eq("status", "pending")`, so reviewing an already-reviewed entry a
+  second time (a double-click, a stale UI) returns a clean `404` rather
+  than silently overwriting a prior `reviewed_by`/`reviewed_at`.
+- **Audit logging.** Both submission and review call `writeAuditLog()` on
+  every outcome branch, same as every other mutating admin/account action
+  in this codebase (§13).
+- **No separate idempotency/uniqueness constraint on submissions, by
+  design.** Unlike `production_conditions`/`observed_hourly` (§5, §15),
+  two submissions with identical commodity/market/price/date are not
+  deduplicated at the database layer — a second data-entry account
+  independently reporting the same observed price is legitimate
+  corroborating data for a reviewer to reconcile, not an erroneous retry
+  to silently merge.
+
+**Proof.** `tests/manual-entries-submission.test.ts` covers the pure
+validation layer: a valid submission is accepted with schema defaults
+applied (`market`, `currency`); an unregistered domain name is rejected;
+a known domain with no manual-entry schema yet (e.g. `input_pricing`) is
+rejected with a clear "no manual-entry form built yet" message rather than
+accepting an unvalidated payload; a non-positive price, a missing
+commodity, an unknown `source` enum value, and a malformed date are each
+rejected. The RLS policies themselves (insert `with check`, the three
+`select` policies, the `super_admin`-only `update`) are a database-level
+property verified by reading migration 0004 alongside the route handlers
+in `src/app/api/manual-entries/`.
+
+## 18. Untrusted NBS responses + the unconfirmed-response-shape risk
+
+**Threat.** `commodity_prices_nbs` (this rework) ingests NBS's Selected
+Food Price Watch — a monthly ZIP, downloaded from a public catalog page,
+containing an xlsx workbook — the same class of risk as §8/§16, but with
+two added wrinkles specific to this source. First, this build
+environment's own outbound network allowlist blocks direct access to
+`nigerianstat.gov.ng` (confirmed via a direct `curl` test: `403` on the
+`CONNECT` tunnel), so the exact live shape of the catalog page and the
+ZIP/xlsx it links to could not be confirmed from here — only from
+research snippets and a sibling catalog's own structure. Second, unzipping
+and parsing an untrusted file is a materially larger attack surface than
+parsing JSON: a malicious or malformed ZIP can be built to exhaust memory,
+overwrite arbitrary paths via a crafted entry name, or exploit a parser
+bug, and NBS's monthly item labels have no fixed schema to validate
+against — they're free-text strings that must be matched, not trusted.
+
+**Mitigation.**
+- **HTML-wall detection before any unzip attempt.**
+  `extractXlsxRowsFromZip()` (`src/lib/domains/commodity-prices/
+  nbs-backfill.ts`) sniffs the response body for HTML markers before ever
+  calling `new AdmZip(zipBuffer)`, and throws a specific, actionable error
+  (naming the catalog URL and what was received instead) rather than
+  letting a ZIP-parsing library choke on an HTML login/terms page and
+  produce a confusing low-level stack trace. Same pattern for
+  `fetchCsvText()` in §19.
+- **Conservative, evidence-only item matching — never a guessed mapping.**
+  `NBS_ITEM_VARIANTS` (`src/lib/domains/commodity-prices/
+  nbs-ingest-logic.ts`) only lists the four of fifteen tracked commodities
+  (Rice (paddy), Yams, Cowpeas, Cattle meat) with an actual confirmed
+  label variant from research. The other eleven simply produce no NBS
+  observation rather than a wrong one guessed from a plausible-looking
+  label — a visible gap in the reconciled output (§20) is always
+  preferred over a silent mismatch.
+- **Defensive header-row and period parsing.** `findNbsHeaderRow()` scans
+  only the first five rows and requires at least two month-parseable
+  cells before accepting a row as the header, rather than assuming a
+  fixed row index that a format change could silently misalign.
+  `parseNbsHeaderPeriod()` requires an exact `month[-]year` shape via
+  regex and returns `null` (skipping that column) rather than guessing on
+  anything looser.
+- **Dependency audit: `adm-zip`.** `npm audit` flagged the
+  auto-resolved `adm-zip@^0.5.18` with multiple HIGH/moderate CVEs
+  relevant to exactly this use (unbounded-memory decompression, a
+  symlink-following arbitrary-file-overwrite on extraction, a
+  decompression-bomb check bypass, and others). Pinned to `^0.6.1`, which
+  patches all of them; re-confirmed clean via `npm audit` after pinning.
+  Re-run `npm audit` after any future `adm-zip` bump.
+
+**Proof.** `tests/nbs-ingest-logic.test.ts` covers: `matchNbsItem`
+(matches known variants, rejects unknowns); `parseNbsHeaderPeriod` and
+`findNbsHeaderRow` (valid headers, no-header-found case); `parseNbsWorksheetRows`
+(dated-column emission, fallback-period behavior, skips non-numeric/
+non-positive cells, handles an empty sheet); `findAllNbsCatalogEntries`/
+`findLatestNbsCatalogEntry` (link extraction, picks the highest catalog
+id, null-handling on no match).
+
+## 19. Untrusted World Bank RTFP responses + the unconfirmed-response-shape risk
+
+**Threat.** `commodity_prices_worldbank_rtfp` (this rework) ingests the
+World Bank's Real-Time Food Prices dataset for Nigeria — a CSV covering
+73 markets' worth of price estimates, re-released under a new dated
+filename on a public microdata catalog roughly weekly. Same first wrinkle
+as §18: this build environment's outbound allowlist also blocks
+`worldbank.org` directly (confirmed the same way), so the live catalog
+and CSV shape are unconfirmed from here. A second, CSV-specific risk:
+matching tracked commodities to arbitrary column names by substring is an
+easy place to introduce a silent false match — which is exactly what
+happened during this build's own testing (see below) — and a parser
+option (`columns: true`) that turns header cells into object keys carries
+its own, separately-patched CVE.
+
+**Mitigation.**
+- **HTML-wall detection before CSV parsing.** `fetchCsvText()`
+  (`src/lib/domains/commodity-prices/worldbank-rtfp-backfill.ts`) checks
+  both the response `content-type` and a body-sniff for HTML before
+  handing anything to `csv-parse`, throwing a specific error naming the
+  catalog URL rather than parsing an HTML page as if it were data.
+- **Word-boundary-aware column matching — caught by this build's own test
+  suite, not assumed correct.** `matchWorldBankColumn()`
+  (`src/lib/domains/commodity-prices/worldbank-rtfp-ingest-logic.ts`)
+  originally matched a tracked commodity by plain substring
+  (`columnName.includes("rice")`), which silently matched the unrelated
+  column `c_food_price_index` as "Rice (paddy)" — the word "price"
+  contains the substring "rice". `tests/worldbank-rtfp-ingest-logic.test.ts`
+  caught this before it ever reached a real run. The fix splits the
+  column name into underscore-delimited segments and requires an *exact*
+  segment match, not a substring — a real but accepted trade-off, since a
+  commodity name written as one word with no delimiter (e.g. a
+  hypothetical `soybean` instead of `soy_bean`) would now be missed
+  rather than matched, which is a visible, safe gap (no data point from
+  that source) rather than a silently wrong one. The same audit also
+  found and fixed a second, structurally identical risk already latent
+  in the variant list itself: `Cowpeas`'s matcher originally included a
+  bare `"bean"`, which — once exact-segment matching was in place — would
+  still have matched a `Cocoa beans` column (`c_cocoa_bean`) ahead of
+  `Cocoa beans`'s own `"cocoa"` entry, since `Cowpeas` is checked earlier
+  in the list. `Cowpeas` now matches only `"cowpea"`/`"cowpeas"`.
+- **Market-to-national aggregation happens inside this source's own
+  parser, before cross-source reconciliation ever runs.**
+  `parseWorldBankRtfpRecords()` averages each commodity's price across
+  all 73 Nigerian markets within a period first, producing one 'National'
+  figure per commodity per period — consistent with the 'National' region
+  convention `production_conditions` already uses — rather than letting
+  73 market-level rows reach `reconcileCommodityPrices()` (§20) and skew
+  an average meant to compare one agency's figure against another's.
+- **No narrower request is possible, so none is attempted.**
+  `fetchWorldBankRtfpBackfillChunk()` takes no date parameters at all —
+  it always fetches the one current whole-history CSV, since World Bank
+  RTFP publishes no date-ranged endpoint. This is a deliberate
+  simplification, not an oversight: a narrower-looking request that
+  silently returned the same whole file regardless would be worse than a
+  function signature that's honest about what it does.
+- **Dependency audit: `csv-parse`.** `npm audit` flagged the
+  auto-resolved `csv-parse@^5.6.0` with a "prototype replacement still
+  reachable via the `columns` path" advisory — directly relevant, since
+  `columns: true` is exactly the option used here. Pinned to `^7.0.2`,
+  which patches it; re-confirmed clean via `npm audit` after pinning.
+
+**Proof.** `tests/worldbank-rtfp-ingest-logic.test.ts` covers:
+`matchWorldBankColumn` (matches a tracked commodity, returns `null` for
+an untracked one, and specifically returns `null` for
+`c_food_price_index` rather than false-matching "Rice (paddy)" — the
+regression test for the bug described above); `parseWorldBankRtfpRecords`
+(market averaging, Nigeria-row filtering); `findLatestWorldBankCsvLink`
+(link extraction).
+
+## 20. Cross-agency price reconciliation integrity
+
+**Threat.** This rework's central new capability —
+`reconcileCommodityPrices()` averaging NBS, World Bank RTFP, and AFEX
+figures for the same commodity — is also its main new correctness risk,
+and it's a credibility risk for Growthly's own data product, not just a
+code bug: AFEX publishes an **exchange spot price** for a traded futures
+contract, while NBS and World Bank RTFP both publish **retail/household**
+prices. These are structurally different measurements of different
+things. Averaging them without checking would produce a single number
+that reads as an authoritative cross-checked "market price" but isn't a
+real price of anything — and unlike a visibly broken feature, a
+confidently-wrong average looks *more* trustworthy than showing the raw,
+unreconciled per-source figures, which makes this exactly the kind of
+mistake worth guarding against deliberately rather than catching by luck.
+The same risk applies, one level down, to blending figures recorded in
+different units or currencies.
+
+**Mitigation.**
+- **Grouping key derived from the source, not from anything a payload
+  controls.** `priceTypeForSource()`
+  (`src/lib/domains/commodity-prices/price-types.ts`) hardcodes
+  `AFEX → "exchange_spot"` and `NBS`/`NBS_HFP`/`WORLD_BANK_RTFP →
+  "retail"`; `reconcileCommodityPrices()` then groups strictly by
+  `(commodity, priceType, unit, currency, region)` before any averaging
+  happens, so a retail figure and an exchange-spot figure for the same
+  commodity are never in the same group no matter what a future payload
+  or a data-entry typo supplies.
+- **"Latest observation per source within a group," not "every
+  observation."** NBS (monthly), World Bank RTFP (weekly-ish whole-history
+  re-release), and AFEX (ad hoc manual entry) update on incompatible
+  cadences and will rarely share an exact `period_date`.
+  `reconcileCommodityPrices()` takes each source's single most recent
+  observation within a compatibility group, rather than requiring exact
+  date alignment (which would mean almost nothing ever reconciles) or
+  averaging a source's whole history into one group (which would quietly
+  weight a source with more observations more heavily).
+- **No silent single-source "average."** An `average` is computed only
+  when two or more sources land in the same group; with only one, it's
+  left `null` rather than presenting an unreconciled single figure as if
+  it had been cross-checked. `CommodityPricesCard.tsx` only renders the
+  average when it's non-null, and always shows each source's own figure
+  alongside it, so the distinction between "two agencies agree" and "one
+  agency reported this" stays visible to anyone reading the dashboard.
+
+**Proof.** `tests/commodity-price-reconcile.test.ts` covers:
+`priceTypeForSource` (correct mapping per source, including the `OTHER`
+default); `normalizeManualCommodityEntry` (AFEX manual-entry payloads map
+to the normalized shape correctly); and `reconcileCommodityPrices`:
+averages two retail sources; **never** averages a retail source with
+AFEX's exchange-spot source for the same commodity; leaves `average`
+`null` with only one source present; keeps only the most recent
+observation per source within a group; never groups observations
+recorded in different units together; returns results sorted by
+commodity name.
 
 ## What is out of scope
 
