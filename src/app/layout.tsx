@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Growthly Intelligence Centre | Growthly Nexus Solutions",
   description:
-    "Continuously animated observed weather telemetry across 24 Nigerian agricultural clusters, updated nightly at 23:59 WAT. A Growthly Nexus Solutions data product.",
+    "Nigerian agricultural intelligence — weather, production conditions, and commodity prices, interpreted into decisions. A Growthly Nexus Solutions data product.",
 };
 
 export const viewport: Viewport = {

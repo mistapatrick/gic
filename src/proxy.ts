@@ -2,7 +2,14 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 const PROTECTED_PAGE_PREFIXES = ["/admin", "/dashboard"];
-const PROTECTED_API_PREFIXES = ["/api/admin"];
+// /api/manual-entries is used by BOTH super_admin (reviewing submissions)
+// and data_entry accounts (submitting their own) — unlike /api/admin, it
+// is not restricted to super_admin at this layer (see the role-specific
+// check further down, which only narrows /api/admin). Gating it here still
+// means an unauthenticated or deactivated caller never reaches the route
+// handler's own checks or Postgres RLS at all, matching the "defense in
+// depth, not a replacement" principle this file documents below.
+const PROTECTED_API_PREFIXES = ["/api/admin", "/api/manual-entries"];
 
 /**
  * Builds a per-request Content-Security-Policy using a freshly generated

@@ -113,3 +113,34 @@ body {
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* Landing page: staggered reveal for the intelligence-formula sequence and
+   the domain-picker grid. Plain CSS, deliberately — no animation library is
+   installed, and this is simple enough (opacity + a short rise) not to need
+   one. Each element gets its animation-delay set inline via a CSS custom
+   property so the stagger is data-driven from one component instead of
+   duplicated per-step classes. */
+@keyframes gic-fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gic-animate-in {
+  opacity: 0;
+  animation: gic-fade-rise 0.6s ease-out forwards;
+  animation-delay: var(--gic-delay, 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gic-animate-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

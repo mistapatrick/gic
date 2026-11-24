@@ -23,7 +23,27 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
  * framework still drives pacing/resumability at the call-site level).
  */
 
-const CATALOG_URL = "https://microdata.worldbank.org/index.php/catalog/4503";
+// Points at the data-dictionary page, not the catalog landing page
+// (/catalog/4503). Confirmed live: the landing page genuinely contains no
+// CSV filename anywhere in its HTML — that's why every backfill attempt
+// against it failed with "Could not find a dated NGA_RTFP_mkt_*.csv link".
+// The filename only appears on this data-dictionary sub-page, as a link
+// styled "NGA_RTFP_mkt_<start_year>_<release_date>.csv".
+//
+// One thing this fix does NOT resolve, and a live check couldn't settle
+// either way: that filename link does not point to the raw CSV — it
+// reloads the same data-dictionary page with a `file_name` query param,
+// which only ever serves documentation (variable list, case count), never
+// the file itself. The only other path found is a "Get Microdata" button
+// pointing at a page with a visible Login link and no page text
+// confirming whether download works without an account. If the actual
+// download turns out to require a login this way, the HTML-wall check in
+// fetchCsvText() below should catch it and throw a clear, specific error
+// rather than silently writing nothing — but if that happens consistently,
+// commodity_prices_worldbank_rtfp likely needs to go back to manual-entry
+// treatment like AFEX, not stay on this automated path. See the backfill
+// job's own `last_error` column for what actually happens on the next run.
+const CATALOG_URL = "https://microdata.worldbank.org/catalog/4503/data-dictionary";
 
 async function fetchCatalogHtml(): Promise<string> {
   const res = await fetch(CATALOG_URL, { cache: "no-store", signal: AbortSignal.timeout(20_000) });

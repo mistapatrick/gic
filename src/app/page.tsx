@@ -1,39 +1,70 @@
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import GicDashboard from "@/components/GicDashboard";
-import { ProductionConditionsCard } from "@/components/ProductionConditionsCard";
-import { CommodityPricesCard } from "@/components/CommodityPricesCard";
-import { DomainCardErrorBoundary } from "@/components/DomainCardErrorBoundary";
-import type { DailyObservedReport } from "@/lib/types";
+import type { CSSProperties } from "react";
+import { isFeatureEnabled } from "@/lib/feature-flags";
+import { GicHero } from "@/components/GicHero";
+import { IntelligenceFormula } from "@/components/IntelligenceFormula";
+import { DomainPicker, type DomainStatus } from "@/components/DomainPicker";
 
-// ISR fallback alongside Supabase Realtime — a visitor landing between
-// Realtime events still sees data no more than a minute stale.
 export const revalidate = 60;
 
+/**
+ * GIC's landing page — introduces the product and its core idea (data +
+ * insight + analytics + modelling + adaptation = intelligence), then hands
+ * off to a domain picker so the user chooses what they want (weather,
+ * produce prices, produce stats, and so on), each domain now living on its
+ * own page. Replaces the previous "/" , which mounted the weather dashboard
+ * directly — that content now lives at /weather (see that page's own
+ * comment for why).
+ */
 export default async function HomePage() {
-  const supabase = getSupabaseBrowserClient();
-  const { data: latestReport } = await supabase
-    .from("daily_observed_reports")
-    .select("*")
-    .order("obs_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [productionConditionsEnabled, commodityPricesEnabled] = await Promise.all([
+    isFeatureEnabled("production_conditions"),
+    isFeatureEnabled("commodity_prices"),
+  ]);
+
+  // Built (Sub-phase 2) but not yet verified live in this deployment is
+  // "preview", not "planned" — the distinction DomainPicker's own comment
+  // documents, and the one this landing page needs to get right rather than
+  // lumping every non-live domain together as equally unbuilt.
+  const productionConditionsStatus: DomainStatus = productionConditionsEnabled ? "live" : "preview";
+  const commodityPricesStatus: DomainStatus = commodityPricesEnabled ? "live" : "preview";
 
   return (
-    <>
-      <GicDashboard initialReport={latestReport as DailyObservedReport | null} />
-      {/* Sub-phase 2 domains — siblings of GicDashboard, not children of it,
-          so a render failure in either card (each also wrapped in its own
-          error boundary) can never affect the weather dashboard above, or
-          each other. Both render null while their own feature_flags row is
-          off, so this is a no-op until the user flips either flag on. */}
-      <div className="mx-auto max-w-6xl space-y-4 px-4 pb-10">
-        <DomainCardErrorBoundary domainLabel="Production conditions">
-          <ProductionConditionsCard />
-        </DomainCardErrorBoundary>
-        <DomainCardErrorBoundary domainLabel="Commodity prices">
-          <CommodityPricesCard />
-        </DomainCardErrorBoundary>
-      </div>
-    </>
+    <div className="min-h-screen bg-brand-white">
+      <main className="mx-auto flex max-w-5xl flex-col items-center px-4 py-12 text-center lg:px-8">
+        <div className="gic-animate-in" style={{ "--gic-delay": "0s" } as CSSProperties}>
+          <GicHero />
+        </div>
+
+        <p
+          className="gic-animate-in mt-6 max-w-xl text-sm text-brand-ink-soft sm:text-base"
+          style={{ "--gic-delay": "0.15s" } as CSSProperties}
+        >
+          Nigeria&apos;s agricultural data, interpreted — not just reported. GIC turns raw
+          observations into a decision, one domain at a time.
+        </p>
+
+        <div className="mt-10 w-full">
+          <IntelligenceFormula />
+        </div>
+
+        <h2
+          className="gic-animate-in mt-14 text-sm font-semibold uppercase tracking-wide text-brand-muted"
+          style={{ "--gic-delay": "1.3s" } as CSSProperties}
+        >
+          Choose what you want to see
+        </h2>
+
+        <div className="mt-5 w-full">
+          <DomainPicker
+            productionConditionsStatus={productionConditionsStatus}
+            commodityPricesStatus={commodityPricesStatus}
+          />
+        </div>
+
+        <footer className="mt-14 pb-4 text-center text-[11px] text-brand-muted">
+          A Growthly Nexus Solutions Limited data product • growthlysolutions.com
+        </footer>
+      </main>
+    </div>
   );
 }
