@@ -3,9 +3,14 @@ import AdmZip from "adm-zip";
 import { parse } from "csv-parse/sync";
 import {
   FAOSTAT_AREA_CODE_NIGERIA,
+  FAOSTAT_DOMAIN_CODE,
   type ProductionConditionRow,
 } from "@/lib/domains/production-conditions/ingest-logic";
-import { parseBulkCsvRows, type BulkCsvRow } from "@/lib/domains/production-conditions/bulk-ingest-logic";
+import {
+  parseBulkCsvRows,
+  extractBulkDownloadUrl,
+  type BulkCsvRow,
+} from "@/lib/domains/production-conditions/bulk-ingest-logic";
 import { upsertProductionConditionRows } from "@/lib/domains/production-conditions/backfill";
 import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
 
@@ -28,10 +33,43 @@ import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
  * query), ZIP-wrapped like NBS's monthly download, and feeds the same
  * production_conditions upsert as the live-query path via
  * upsertProductionConditionRows() in backfill.ts.
+ *
+ * This file's first live run returned HTTP 403 against a hardcoded bulk
+ * ZIP filename (found via a third-party documentation site, never
+ * confirmed from this sandbox) — a stale or wrong filename is a very
+ * plausible cause of exactly that response from a static-file host. Fixed
+ * by resolving the real, current download URL from FAOSTAT's own
+ * bulk-downloads catalog endpoint first (resolveBulkDownloadUrl below)
+ * rather than hardcoding a second guess. If the catalog-resolved URL ALSO
+ * 403s, that would be much stronger evidence of a blanket block on
+ * automated/datacenter-origin traffic (the same suspicion already raised
+ * for the live query API's 521s) rather than a wrong link — at which
+ * point the manual-upload route becomes the one reliably working path
+ * into this domain, not a stopgap.
  */
 
-const BULK_ZIP_URL =
-  "https://bulks-faostat.fao.org/production/Production_Crops_Livestock_E_All_Data_NOFLAG.zip";
+const BULKDOWNLOADS_CATALOG_URL = `https://fenixservices.fao.org/faostat/api/v1/en/bulkdownloads/${FAOSTAT_DOMAIN_CODE}`;
+
+/**
+ * Looks up the CURRENT bulk-ZIP download URL from FAOSTAT's own catalog,
+ * rather than trusting a hardcoded filename — see extractBulkDownloadUrl's
+ * own comment for why. A failure here (non-2xx, or no URL found in the
+ * response) is a different, more specific signal than a failure on the
+ * download itself: it means either the catalog endpoint itself is
+ * unreachable/blocked, or its response shape has changed, as opposed to
+ * the actual file download being rejected.
+ */
+async function resolveBulkDownloadUrl(): Promise<string> {
+  const res = await fetch(BULKDOWNLOADS_CATALOG_URL, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+    headers: GIC_OUTBOUND_HEADERS,
+  });
+  if (!res.ok) {
+    throw new Error(`FAOSTAT bulk-downloads catalog request failed: HTTP ${res.status}`);
+  }
+  return extractBulkDownloadUrl(await res.text());
+}
 
 /**
  * Downloads the bulk ZIP and returns its parsed CSV rows (csv-parse's
@@ -88,7 +126,8 @@ export function extractCsvRowsFromZipOrCsv(buffer: Buffer): BulkCsvRow[] {
 }
 
 export async function fetchProductionConditionsBulkChunk(): Promise<BulkCsvRow[]> {
-  const res = await fetch(BULK_ZIP_URL, {
+  const downloadUrl = await resolveBulkDownloadUrl();
+  const res = await fetch(downloadUrl, {
     cache: "no-store",
     // 45s, matching every other "big download" call in this codebase
     // (production_conditions' own live-query fetch, NBS's ZIP, World
@@ -113,7 +152,7 @@ export async function fetchProductionConditionsBulkChunk(): Promise<BulkCsvRow[]
     headers: GIC_OUTBOUND_HEADERS,
   });
   if (!res.ok) {
-    throw new Error(`FAOSTAT bulk download failed: HTTP ${res.status}`);
+    throw new Error(`FAOSTAT bulk download failed: HTTP ${res.status} (${downloadUrl})`);
   }
   const buffer = Buffer.from(await res.arrayBuffer());
   return extractCsvRowsFromZipOrCsv(buffer);

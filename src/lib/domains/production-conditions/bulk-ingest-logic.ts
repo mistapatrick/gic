@@ -34,6 +34,45 @@ import {
 
 const EXPECTED_AREA_NAME = "nigeria";
 const YEAR_COLUMN_PATTERN = /^Y(\d{4})$/;
+const BULK_ZIP_URL_PATTERN = /https:\/\/bulks-faostat\.fao\.org\/[^"'\s\\]+\.zip/g;
+
+/**
+ * Pulls the current, real download URL out of FAOSTAT's own bulk-downloads
+ * catalog response (GET https://fenixservices.fao.org/faostat/api/v1/en/
+ * bulkdownloads/{domainCode} — documented in the R `FAOSTAT` package's own
+ * source as `get_fao(paste0("/bulkdownloads/", dataset_code))`, and in
+ * third-party API profiles as returning each file's "Full URL for
+ * downloading the ZIP file").
+ *
+ * This exists because the first version of bulk-backfill.ts hardcoded a
+ * filename found via a third-party documentation site rather than FAOSTAT's
+ * own catalog — and the live run's first real HTTP 403 against that
+ * hardcoded URL is exactly the failure mode a stale or wrong filename would
+ * produce. Rather than hardcode a second guess, this scans the catalog
+ * response text for any bulks-faostat.fao.org .zip URL, which is robust to
+ * not knowing that response's exact JSON field names (never confirmed from
+ * this sandbox either) — as long as the real URL appears as a string
+ * somewhere in the response, which a "list of downloadable files" catalog
+ * will always contain.
+ *
+ * Prefers a URL containing "NOFLAG" (the flag-stripped variant this
+ * parser's column detection was built against) when more than one file is
+ * listed for the domain; falls back to the first match otherwise.
+ */
+export function extractBulkDownloadUrl(catalogResponseText: string): string {
+  const matches = catalogResponseText.match(BULK_ZIP_URL_PATTERN) ?? [];
+  if (matches.length === 0) {
+    throw new Error(
+      "FAOSTAT's bulk-downloads catalog response contained no recognizable " +
+        "bulks-faostat.fao.org .zip URL — its response shape may differ from what this parser " +
+        `expects. First 500 characters of the response: ${catalogResponseText.slice(0, 500)}`
+    );
+  }
+  // matches[0] is safe here: the length check above already guarantees at
+  // least one element, but TS's noUncheckedIndexedAccess can't see that
+  // across the earlier early-return.
+  return matches.find((u) => u.includes("NOFLAG")) ?? matches[0]!;
+}
 
 export type BulkCsvShape = "wide" | "long";
 
