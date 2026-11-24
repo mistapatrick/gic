@@ -125,7 +125,12 @@ export async function fetchNbsBackfillChunk(
 
   const results: { periodDate: string; sheets: NbsCellValue[][][] }[] = [];
   for (const entry of entries) {
-    const res = await fetch(entry.downloadUrl, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
+    // 45s, not the original 30s — same preemptive reasoning as World Bank
+    // RTFP's CSV fetch above: this is the real monthly ZIP download, not
+    // the small catalog HTML page fetchCatalogHtml() above pulls, and that
+    // small-page/big-payload split is exactly where the production
+    // conditions and World Bank timeouts turned out to be too short.
+    const res = await fetch(entry.downloadUrl, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
     if (!res.ok) {
       throw new Error(`NBS file download failed (${entry.downloadUrl}): HTTP ${res.status}`);
     }

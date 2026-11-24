@@ -27,7 +27,15 @@ export async function fetchProductionConditionsBackfillChunk(
 ): Promise<unknown> {
   const years = enumerateYears(chunkStart, chunkEnd);
   const url = buildFaostatUrl(FAOSTAT_AREA_CODE_NIGERIA, years);
-  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  // 45s, not the original 20s: the live cron route (src/app/api/ingest/
+  // production-conditions/route.ts) hit this exact same undersized timeout
+  // against this exact same FAOSTAT endpoint and needed 45s to clear it —
+  // this file is a separate code path (the backfill adapter, not the live
+  // route) that was never touched by that fix, so it still had the
+  // original bug. A backfill chunk can also span more years in one request
+  // than the live route's "last 3 years" ever does, so if anything this
+  // call needs more headroom than that one did, not less.
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
   if (!res.ok) {
     throw new Error(`FAOSTAT request failed: HTTP ${res.status}`);
   }

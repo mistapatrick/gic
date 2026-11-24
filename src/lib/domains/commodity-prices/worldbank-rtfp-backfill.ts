@@ -54,7 +54,16 @@ async function fetchCatalogHtml(): Promise<string> {
 }
 
 async function fetchCsvText(url: string): Promise<string> {
-  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
+  // 45s, not the original 30s: raised preemptively, not from an observed
+  // failure here specifically. production_conditions' own fetch (same
+  // sandbox, same inability to test live) turned out to need 45s once
+  // actually exercised against a real deployment, after 20s proved too
+  // short twice (the live route, then separately this domain's own
+  // catalog-page fetch above). This is the real whole-history CSV, not the
+  // small catalog HTML page fetchCatalogHtml() above pulls — the same
+  // small-page-vs-big-payload gap that caused that earlier bug, caught
+  // here before it reproduces instead of after.
+  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
   if (!res.ok) {
     throw new Error(`World Bank RTFP CSV download failed (${url}): HTTP ${res.status}`);
   }
