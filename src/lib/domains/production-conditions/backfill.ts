@@ -61,9 +61,15 @@ export function parseProductionConditionsBackfillChunk(data: unknown): Productio
  * (commodity, metric, year, region) constraint is designed for: re-running
  * a backfill chunk that overlaps an already-ingested year overwrites the
  * same rows rather than erroring or duplicating.
+ *
+ * Shared across every write path into this table — the live-query JSON
+ * path below, and the independent bulk-CSV path in bulk-backfill.ts and
+ * the super-admin manual upload route — so there is exactly one place
+ * that knows this table's conflict target. None of those other callers
+ * know or care how their rows were parsed; they just need them written
+ * the same, idempotent way.
  */
-export async function writeProductionConditionsBackfillChunk(data: unknown): Promise<number> {
-  const rows = parseProductionConditionsBackfillChunk(data);
+export async function upsertProductionConditionRows(rows: ProductionConditionRow[]): Promise<number> {
   if (rows.length === 0) return 0;
 
   const admin = getSupabaseAdminClient();
@@ -73,4 +79,9 @@ export async function writeProductionConditionsBackfillChunk(data: unknown): Pro
   if (error) throw new Error(`production_conditions upsert failed: ${error.message}`);
 
   return rows.length;
+}
+
+export async function writeProductionConditionsBackfillChunk(data: unknown): Promise<number> {
+  const rows = parseProductionConditionsBackfillChunk(data);
+  return upsertProductionConditionRows(rows);
 }

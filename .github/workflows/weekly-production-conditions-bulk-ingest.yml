@@ -1,0 +1,31 @@
+name: Weekly Sunday 2359 WAT Production Conditions Bulk Ingestion
+
+on:
+  schedule:
+    # 22:59 UTC Sunday == 23:59 WAT (GMT+1) Sunday — a day apart from the
+    # existing Saturday production-conditions live-query cron
+    # (weekly-production-conditions-ingest.yml) purely so the two routes'
+    # logs never interleave; they write to the same idempotent table and
+    # would cause no harm running back-to-back. FAOSTAT's bulk files are
+    # only republished after each annual data release, so "weekly" here is
+    # a cheap, harmless upper bound on staleness (same reasoning as the
+    # live-query route's own weekly cadence), not a sign the file changes
+    # that often.
+    - cron: "59 22 * * 0"
+  workflow_dispatch: # Manual trigger from the GitHub UI
+
+jobs:
+  trigger-ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Vercel production-conditions bulk ingest endpoint
+        run: |
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" \
+            -X POST "${{ secrets.VERCEL_APP_URL }}/api/ingest/production-conditions-bulk" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          cat response.json
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Ingestion failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi

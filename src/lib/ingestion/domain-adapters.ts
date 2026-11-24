@@ -17,6 +17,10 @@ import {
   fetchWorldBankRtfpBackfillChunk,
   writeWorldBankRtfpBackfillChunk,
 } from "@/lib/domains/commodity-prices/worldbank-rtfp-backfill";
+import {
+  fetchProductionConditionsBulkChunk,
+  writeProductionConditionsBulkChunk,
+} from "@/lib/domains/production-conditions/bulk-backfill";
 
 /**
  * One entry per data domain that supports historical backfill. This is the
@@ -84,9 +88,26 @@ async function getCommodityPricesWorldBankRtfpAdapter(): Promise<BackfillAdapter
   };
 }
 
+// FAOSTAT's static bulk-download file — production_conditions' SECOND,
+// independent backfill adapter, registered alongside (not replacing)
+// production_conditions above. Same "ignore the chunk's date span, always
+// pull the one current whole-history file" shape as the World Bank RTFP
+// adapter just above, for the same reason: there is no narrower request
+// to make. Letting this through the existing BackfillPanel UI means the
+// admin's "From/To" date fields are unused for this domain (same quirk
+// already accepted for commodity_prices_worldbank_rtfp) — harmless, and
+// no new UI was needed to expose a manual "run this now" trigger here.
+async function getProductionConditionsBulkAdapter(): Promise<BackfillAdapter> {
+  return {
+    fetchChunk: () => fetchProductionConditionsBulkChunk(),
+    writeChunk: (data) => writeProductionConditionsBulkChunk(data as Parameters<typeof writeProductionConditionsBulkChunk>[0]),
+  };
+}
+
 const ADAPTER_FACTORIES: Record<string, () => Promise<BackfillAdapter>> = {
   weather: getWeatherAdapter,
   production_conditions: getProductionConditionsAdapter,
+  production_conditions_bulk: getProductionConditionsBulkAdapter,
   commodity_prices_nbs: getCommodityPricesNbsAdapter,
   commodity_prices_worldbank_rtfp: getCommodityPricesWorldBankRtfpAdapter,
 };

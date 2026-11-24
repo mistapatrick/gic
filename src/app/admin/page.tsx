@@ -4,6 +4,7 @@ import { SignOutButton } from "@/components/SignOutButton";
 import { AdminAccountsPanel } from "@/components/AdminAccountsPanel";
 import { BackfillPanel } from "@/components/BackfillPanel";
 import { ManualEntryReviewPanel } from "@/components/ManualEntryReviewPanel";
+import { ProductionConditionsBulkUploadPanel } from "@/components/ProductionConditionsBulkUploadPanel";
 import { BACKFILL_DOMAINS } from "@/lib/ingestion/domain-adapters";
 
 export default async function AdminPage() {
@@ -37,6 +38,10 @@ export default async function AdminPage() {
 
         <div className="mt-6">
           <BackfillPanel domains={BACKFILL_DOMAINS} />
+        </div>
+
+        <div className="mt-6">
+          <ProductionConditionsBulkUploadPanel />
         </div>
 
         <div className="mt-6">
