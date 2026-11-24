@@ -8,6 +8,7 @@ import {
   FaostatResponseSchema,
   FAOSTAT_AREA_CODE_NIGERIA,
 } from "@/lib/domains/production-conditions/ingest-logic";
+import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
 
 /**
  * Weekly steady-state ingest for production_conditions — the FAOSTAT
@@ -60,7 +61,11 @@ export async function POST(req: NextRequest) {
     // unfiltered multi-year response. 45s leaves ~15s of the route's own
     // 60s maxDuration for the JSON parse, Zod validation, and Supabase
     // writes that still have to happen after this fetch returns.
-    res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
+    res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(45_000),
+      headers: GIC_OUTBOUND_HEADERS,
+    });
   } catch (err) {
     console.error("[ingest/production-conditions] FAOSTAT request failed:", err);
     return NextResponse.json({ error: "FAOSTAT fetch failed" }, { status: 502 });

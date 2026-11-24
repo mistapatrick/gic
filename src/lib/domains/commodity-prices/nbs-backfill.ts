@@ -8,6 +8,7 @@ import {
 } from "@/lib/domains/commodity-prices/nbs-ingest-logic";
 import type { NormalizedPriceObservation } from "@/lib/domains/commodity-prices/price-types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
 
 /**
  * NBS Selected Food Price Watch's network/zip/xlsx side — the direct
@@ -29,7 +30,11 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 const CATALOG_URL = "https://microdata.nigerianstat.gov.ng/index.php/catalog/162";
 
 async function fetchCatalogHtml(): Promise<string> {
-  const res = await fetch(CATALOG_URL, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  const res = await fetch(CATALOG_URL, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+    headers: GIC_OUTBOUND_HEADERS,
+  });
   if (!res.ok) {
     throw new Error(`NBS catalog request failed: HTTP ${res.status}`);
   }
@@ -130,7 +135,11 @@ export async function fetchNbsBackfillChunk(
     // the small catalog HTML page fetchCatalogHtml() above pulls, and that
     // small-page/big-payload split is exactly where the production
     // conditions and World Bank timeouts turned out to be too short.
-    const res = await fetch(entry.downloadUrl, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
+    const res = await fetch(entry.downloadUrl, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(45_000),
+      headers: GIC_OUTBOUND_HEADERS,
+    });
     if (!res.ok) {
       throw new Error(`NBS file download failed (${entry.downloadUrl}): HTTP ${res.status}`);
     }

@@ -6,6 +6,7 @@ import {
 } from "@/lib/domains/commodity-prices/worldbank-rtfp-ingest-logic";
 import type { NormalizedPriceObservation } from "@/lib/domains/commodity-prices/price-types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
 
 /**
  * World Bank RTFP's network/catalog/CSV side — the direct parallel of
@@ -46,7 +47,11 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 const CATALOG_URL = "https://microdata.worldbank.org/catalog/4503/data-dictionary";
 
 async function fetchCatalogHtml(): Promise<string> {
-  const res = await fetch(CATALOG_URL, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  const res = await fetch(CATALOG_URL, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+    headers: GIC_OUTBOUND_HEADERS,
+  });
   if (!res.ok) {
     throw new Error(`World Bank RTFP catalog request failed: HTTP ${res.status}`);
   }
@@ -63,7 +68,11 @@ async function fetchCsvText(url: string): Promise<string> {
   // small catalog HTML page fetchCatalogHtml() above pulls — the same
   // small-page-vs-big-payload gap that caused that earlier bug, caught
   // here before it reproduces instead of after.
-  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
+  const res = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(45_000),
+    headers: GIC_OUTBOUND_HEADERS,
+  });
   if (!res.ok) {
     throw new Error(`World Bank RTFP CSV download failed (${url}): HTTP ${res.status}`);
   }

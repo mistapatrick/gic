@@ -8,6 +8,7 @@ import {
   type ProductionConditionRow,
 } from "@/lib/domains/production-conditions/ingest-logic";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
 
 /**
  * production_conditions domain's plug-in for the generic backfill
@@ -35,7 +36,11 @@ export async function fetchProductionConditionsBackfillChunk(
   // original bug. A backfill chunk can also span more years in one request
   // than the live route's "last 3 years" ever does, so if anything this
   // call needs more headroom than that one did, not less.
-  const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(45_000) });
+  const res = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(45_000),
+    headers: GIC_OUTBOUND_HEADERS,
+  });
   if (!res.ok) {
     throw new Error(`FAOSTAT request failed: HTTP ${res.status}`);
   }
