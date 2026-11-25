@@ -38,16 +38,25 @@ const RECENT_MANUAL_ENTRIES_LIMIT = 100;
 
 /**
  * Public dashboard card for commodity_prices, now a mix of automated
- * sources (NBS, World Bank RTFP — commodity_price_observations) and a
- * manual one (AFEX, and any ad hoc "OTHER" entry — manual_data_entries,
- * status='published' only). Both are fetched via the anon browser client
- * against their respective public-read RLS policies, normalized into one
- * shape, and reconciled: each source's own figure stays visible, with a
- * cross-agency average shown only where NBS and World Bank RTFP (both
- * retail-price measurements) agree on commodity/unit — AFEX's exchange
- * spot price is never blended into that average, since it measures a
- * structurally different thing. Hidden entirely while
+ * sources (NBS, World Bank RTFP, FEWS NET — commodity_price_observations)
+ * and a manual one (AFEX, and any ad hoc "OTHER" entry —
+ * manual_data_entries, status='published' only). Both are fetched via the
+ * anon browser client against their respective public-read RLS policies,
+ * normalized into one shape, and reconciled: each source's own figure
+ * stays visible, with a cross-agency average shown only where sources
+ * measuring the same thing (retail prices) agree on commodity/unit —
+ * AFEX's exchange spot price is never blended into that average, since it
+ * measures a structurally different thing. Hidden entirely while
  * feature_flags.commodity_prices is false.
+ *
+ * FEWS_NET rows get a SECOND, independent gate
+ * (feature_flags.commodity_prices_fewsnet) on top of the domain-wide flag
+ * above: the weekly ingest writes them regardless, but they're filtered
+ * out of what this card actually reconciles and displays until that flag
+ * is separately switched on — the user's explicit request, so FEWS NET
+ * data can accumulate for review without silently entering the public
+ * reconciled average the moment the broader commodity_prices flag goes
+ * live for NBS/World Bank RTFP.
  */
 export function CommodityPricesCard() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -58,7 +67,10 @@ export function CommodityPricesCard() {
     let cancelled = false;
 
     async function load() {
-      const flagOn = await isFeatureEnabled("commodity_prices");
+      const [flagOn, fewsNetOn] = await Promise.all([
+        isFeatureEnabled("commodity_prices"),
+        isFeatureEnabled("commodity_prices_fewsnet"),
+      ]);
       if (cancelled) return;
       setEnabled(flagOn);
       if (!flagOn) return;
@@ -87,8 +99,9 @@ export function CommodityPricesCard() {
           return;
         }
 
-        const automated: NormalizedPriceObservation[] = ((observationsRes.data as ObservationRow[]) ?? []).map(
-          (row) => ({
+        const automated: NormalizedPriceObservation[] = ((observationsRes.data as ObservationRow[]) ?? [])
+          .filter((row) => fewsNetOn || row.source !== "FEWS_NET")
+          .map((row) => ({
             commodity: row.commodity,
             source: row.source,
             priceType: row.price_type as NormalizedPriceObservation["priceType"],
@@ -98,8 +111,7 @@ export function CommodityPricesCard() {
             periodDate: row.period_date,
             region: row.region,
             rawItemLabel: row.raw_item_label,
-          })
-        );
+          }));
 
         const manual: NormalizedPriceObservation[] = ((manualRes.data as PublishedManualEntry[]) ?? []).map(
           (entry) => normalizeManualCommodityEntry({ entryDate: entry.entry_date, payload: entry.payload })

@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import GicDashboard from "@/components/GicDashboard";
 import type { DailyObservedReport } from "@/lib/types";
@@ -16,6 +14,16 @@ export const revalidate = 60;
  * own page per the cross-cutting "every domain gets its own ... UI section"
  * commitment — extended here to mean its own route, not just its own card
  * on a shared page.
+ *
+ * The plain "← GIC Home" bar that used to sit above GicDashboard here is
+ * gone as of 2026-11-25 — it was literally the piece of UI behind the
+ * complaint that drove this change ("I click on weather I find it
+ * difficult navigating around and when a[s] i want to see another
+ * parameter I still have to navigate back to the landing page"):  a link
+ * back to "/" was the ONLY way out of this page. AppShell now gives every
+ * page, this one included, a persistent nav to every other domain
+ * directly, not just Home, so that bar added nothing a real fix didn't
+ * already cover.
  */
 export default async function WeatherPage() {
   const supabase = getSupabaseBrowserClient();
@@ -26,24 +34,5 @@ export default async function WeatherPage() {
     .limit(1)
     .maybeSingle();
 
-  return (
-    <>
-      {/* Plain (non-sticky) bar above GicDashboard's own sticky header, so
-          the two never compete for the same fixed position — this scrolls
-          away with the page, and GicDashboard's header takes over the top
-          of the viewport from there, same as it always has. Kept outside
-          GicDashboard itself so that already-tested component doesn't need
-          to change now that it's no longer the top-level page. */}
-      <div className="border-b border-brand-grey-green bg-brand-white px-4 py-1.5 lg:px-8">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs font-medium text-brand-ink-soft hover:bg-brand-mint-pale"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-          GIC Home
-        </Link>
-      </div>
-      <GicDashboard initialReport={latestReport as DailyObservedReport | null} />
-    </>
-  );
+  return <GicDashboard initialReport={latestReport as DailyObservedReport | null} />;
 }

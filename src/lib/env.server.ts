@@ -17,6 +17,7 @@ const EnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(10),
+  GROQ_API_KEY: z.string().min(10),
   CRON_SECRET: z.string().min(16, "CRON_SECRET should be at least 16 characters — generate one with `openssl rand -hex 32`"),
 });
 

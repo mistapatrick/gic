@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateObject } from "ai";
-import { withGeminiFallback } from "@/lib/ai-models";
+import { withAiFallback } from "@/lib/ai-models";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   ProductionBriefSchema,
@@ -43,7 +43,13 @@ export async function GET() {
       .from("production_conditions")
       .select("commodity, metric, value, unit, year")
       .eq("region", "National")
-      .in("metric", ["production_quantity", "yield", "area_harvested"])
+      .in("metric", [
+        "production_quantity",
+        "yield",
+        "area_harvested",
+        "stocks",
+        "producing_animals_slaughtered",
+      ])
       .order("year", { ascending: false });
 
     if (result.error) {
@@ -64,7 +70,7 @@ export async function GET() {
   const compactTelemetry = buildCompactProductionTelemetry(rows);
 
   try {
-    const result = await withGeminiFallback((model) =>
+    const result = await withAiFallback((model) =>
       generateObject({
         model,
         schema: ProductionBriefSchema,

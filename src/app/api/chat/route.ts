@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
-import { withGeminiFallback } from "@/lib/ai-models";
+import { withAiFallback } from "@/lib/ai-models";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { checkRateLimit, getClientKey } from "@/lib/rate-limit";
 import { ChatRequestSchema, buildChatSystemPrompt } from "@/lib/domains/weather/chat-logic";
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const systemPrompt = buildChatSystemPrompt(report as DailyObservedReport | null);
 
   try {
-    const result = await withGeminiFallback((model) =>
+    const result = await withAiFallback((model) =>
       generateText({
         model,
         system: systemPrompt,

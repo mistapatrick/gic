@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateObject } from "ai";
-import { withGeminiFallback } from "@/lib/ai-models";
+import { withAiFallback } from "@/lib/ai-models";
 import { z } from "zod";
 import { getServerEnv } from "@/lib/env.server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -117,14 +117,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Database write failed" }, { status: 500 });
   }
 
-  // 6. Generate a grounded observational summary via the free Gemini Flash-Lite
-  //    tier (primary gemini-3.5-flash-lite, falling back to gemini-3.1-flash-lite
-  //    on a retryable error — see src/lib/ai-models.ts for why Flash-Lite,
-  //    not plain Flash, is the free-tier-appropriate choice here).
+  // 6. Generate a grounded observational summary via the free three-leg AI
+  //    fallback chain (primary gemini-3.5-flash-lite, then gemini-3.1-flash-lite,
+  //    then Groq's gpt-oss-120b, each attempted only after the previous one
+  //    fails retryably — see src/lib/ai-models.ts for why Flash-Lite, not
+  //    plain Flash, and why Groq's gpt-oss-120b, are the free-tier-appropriate
+  //    choices here).
   const compactTelemetry = buildCompactTelemetry(clusterMetrics);
   let aiBrief: z.infer<typeof AgentReportSchema>;
   try {
-    const result = await withGeminiFallback((model) =>
+    const result = await withAiFallback((model) =>
       generateObject({
         model,
         schema: AgentReportSchema,

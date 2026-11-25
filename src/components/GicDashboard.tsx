@@ -437,10 +437,6 @@ export default function GicDashboard({
         </section>
 
         <AgentBriefPanel report={report} />
-
-        <footer className="pb-6 text-center text-[11px] text-brand-muted">
-          A Growthly Nexus Solutions Limited data product • growthlysolutions.com
-        </footer>
       </main>
     </div>
   );

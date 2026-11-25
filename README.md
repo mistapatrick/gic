@@ -288,17 +288,25 @@ growthly-gic/
    - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (**server secret —
      never expose this to the browser**)
 
-### Step 2 — Obtain a free Google Gemini API key
+### Step 2 — Obtain free Gemini and Groq API keys
 
 1. Go to [Google AI Studio](https://aistudio.google.com) → **Get API Key** →
    **Create API key**.
 2. Save it as `GOOGLE_GENERATIVE_AI_API_KEY` (free tier for the
    `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite` models this app uses).
+3. Go to [console.groq.com](https://console.groq.com) → **API Keys** →
+   **Create API Key**.
+4. Save it as `GROQ_API_KEY` (free tier for `openai/gpt-oss-120b`).
 
-Groq is part of GIC's approved free-tier toolset for later sub-phases (a
-second model provider / capacity pool for the AI insight work beyond
-weather) but nothing in this repository calls it yet — there is no
-`GROQ_API_KEY` to set up for Sub-phase 1.
+Every AI call in this app (`/api/ingest`'s nightly brief, `/api/chat`, and
+`/api/production-conditions-brief`) goes through `withAiFallback()`
+(`src/lib/ai-models.ts`), a three-leg fallback chain: both Gemini models
+first, then Groq's `openai/gpt-oss-120b` last, only reached if both Gemini
+legs fail with a retryable error (high demand, quota, timeout). Groq being a
+different vendor on different infrastructure means a Google-side outage
+can't take the whole chain down with it. Both keys are required — without
+`GROQ_API_KEY`, the app still runs, but a Gemini outage has nowhere left to
+fall back to.
 
 ### Step 3 — Local setup & push to a new GitHub repository
 
@@ -332,9 +340,10 @@ with an `ERESOLVE` error before the build ever starts.
 
 1. **Vercel Dashboard → Add New Project** → import your new `growthly-gic`
    repo (a **new** Vercel project — not the pilot's).
-2. Under **Environment Variables**, add all five app secrets:
+2. Under **Environment Variables**, add all six app secrets:
    `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `CRON_SECRET`.
+   `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`,
+   `GROQ_API_KEY`, `CRON_SECRET`.
    **Do not** add `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` here — those
    are read only by the one-time local seed script (Step 5), never by the
    deployed app.

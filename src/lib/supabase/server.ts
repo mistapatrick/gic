@@ -2,6 +2,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { getServerEnv } from "@/lib/env.server";
+import { DATA_ENTRY_DOMAINS } from "@/lib/domains/registry";
 
 /**
  * Cookie-aware Supabase client for Server Components and Route Handlers,
@@ -46,6 +47,21 @@ export async function getSupabaseServerClient() {
  * Returns null if there is no session, or no role row exists yet for this
  * user (e.g. an auth.users row created but never granted a role — treated
  * as "no access", not "super admin by default").
+ *
+ * domainScope synthesis (added 2026-11-25): a super_admin's own
+ * user_roles.domain_scope column is always '{}' in the database — the
+ * column was only ever meant for data_entry accounts; a super admin's
+ * access was historically "full account-management access instead" (see
+ * 0002_auth_roles_audit.sql's own comment on that column), not a domain
+ * grant. That changed with an explicit requirement that super_admin be
+ * able to perform every manual-entry function directly, not only assign
+ * it to other accounts — so here, and only here, a super_admin's
+ * domainScope is reported as the full DATA_ENTRY_DOMAINS list rather than
+ * the raw (empty) column value. Every existing
+ * domainScope.includes("...") check in the UI (dashboard/page.tsx) and
+ * every RLS policy built on has_domain_scope() (migration 0009) therefore
+ * treats a super_admin as scoped to all four domains without either of
+ * them needing their own separate "or is_super_admin()" special case.
  */
 export async function getCurrentUserRole(): Promise<{
   userId: string;
@@ -70,7 +86,7 @@ export async function getCurrentUserRole(): Promise<{
     userId: userData.user.id,
     email: userData.user.email ?? null,
     role: roleRow.role,
-    domainScope: roleRow.domain_scope ?? [],
+    domainScope: roleRow.role === "super_admin" ? [...DATA_ENTRY_DOMAINS] : roleRow.domain_scope ?? [],
     active: roleRow.active,
   };
 }

@@ -16,9 +16,10 @@ export const revalidate = 60;
  * comment for why).
  */
 export default async function HomePage() {
-  const [productionConditionsEnabled, commodityPricesEnabled] = await Promise.all([
+  const [productionConditionsEnabled, commodityPricesEnabled, foodSecurityEnabled] = await Promise.all([
     isFeatureEnabled("production_conditions"),
     isFeatureEnabled("commodity_prices"),
+    isFeatureEnabled("food_security"),
   ]);
 
   // Built (Sub-phase 2) but not yet verified live in this deployment is
@@ -27,6 +28,7 @@ export default async function HomePage() {
   // lumping every non-live domain together as equally unbuilt.
   const productionConditionsStatus: DomainStatus = productionConditionsEnabled ? "live" : "preview";
   const commodityPricesStatus: DomainStatus = commodityPricesEnabled ? "live" : "preview";
+  const foodSecurityStatus: DomainStatus = foodSecurityEnabled ? "live" : "preview";
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -54,16 +56,13 @@ export default async function HomePage() {
           Choose what you want to see
         </h2>
 
-        <div className="mt-5 w-full">
+        <div className="mt-5 w-full pb-10">
           <DomainPicker
             productionConditionsStatus={productionConditionsStatus}
             commodityPricesStatus={commodityPricesStatus}
+            foodSecurityStatus={foodSecurityStatus}
           />
         </div>
-
-        <footer className="mt-14 pb-4 text-center text-[11px] text-brand-muted">
-          A Growthly Nexus Solutions Limited data product • growthlysolutions.com
-        </footer>
       </main>
     </div>
   );

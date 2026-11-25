@@ -21,6 +21,14 @@ import {
   fetchProductionConditionsBulkChunk,
   writeProductionConditionsBulkChunk,
 } from "@/lib/domains/production-conditions/bulk-backfill";
+import {
+  fetchFewsNetBackfillChunk,
+  writeFewsNetBackfillChunk,
+} from "@/lib/domains/commodity-prices/fewsnet-backfill";
+import {
+  fetchFoodSecurityBackfillChunk,
+  writeFoodSecurityBackfillChunk,
+} from "@/lib/domains/food-security/backfill";
 
 /**
  * One entry per data domain that supports historical backfill. This is the
@@ -104,12 +112,34 @@ async function getProductionConditionsBulkAdapter(): Promise<BackfillAdapter> {
   };
 }
 
+// FEWS NET (HDX) — commodity_prices' third automated source. Same
+// "whole-history file, no narrower request" shape as World Bank RTFP.
+async function getCommodityPricesFewsNetAdapter(): Promise<BackfillAdapter> {
+  return {
+    fetchChunk: () => fetchFewsNetBackfillChunk(),
+    writeChunk: (data) => writeFewsNetBackfillChunk(data as Parameters<typeof writeFewsNetBackfillChunk>[0]),
+  };
+}
+
+// HDX HAPI food-security — a new domain. location_code=NGA is applied
+// server-side by the fetch itself, so the chunk's date span (like World
+// Bank RTFP's) doesn't narrow the request; HAPI's own pagination is
+// handled internally by fetchFoodSecurityBackfillChunk.
+async function getFoodSecurityAdapter(): Promise<BackfillAdapter> {
+  return {
+    fetchChunk: () => fetchFoodSecurityBackfillChunk(),
+    writeChunk: (data) => writeFoodSecurityBackfillChunk(data as Parameters<typeof writeFoodSecurityBackfillChunk>[0]),
+  };
+}
+
 const ADAPTER_FACTORIES: Record<string, () => Promise<BackfillAdapter>> = {
   weather: getWeatherAdapter,
   production_conditions: getProductionConditionsAdapter,
   production_conditions_bulk: getProductionConditionsBulkAdapter,
   commodity_prices_nbs: getCommodityPricesNbsAdapter,
   commodity_prices_worldbank_rtfp: getCommodityPricesWorldBankRtfpAdapter,
+  commodity_prices_fewsnet: getCommodityPricesFewsNetAdapter,
+  food_security: getFoodSecurityAdapter,
 };
 
 export const BACKFILL_DOMAINS = Object.keys(ADAPTER_FACTORIES);

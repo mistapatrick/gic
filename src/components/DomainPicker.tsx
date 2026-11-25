@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { CloudRain, Tag, Sprout, Bug, PawPrint, Package, type LucideIcon } from "lucide-react";
+import { CloudRain, Tag, Sprout, Bug, PawPrint, Package, HeartPulse, type LucideIcon } from "lucide-react";
 
 export type DomainStatus = "live" | "preview" | "planned";
 
@@ -31,16 +31,18 @@ const STATUS_STYLE: Record<DomainStatus, { badge: string; badgeText: string; car
  *   - "planned": no sub-phase has built this domain yet at all (per the
  *     build plan's sub-phase 3-5 scope) — not linked, since there is
  *     nothing real to show.
- * Status for production_conditions/commodity_prices is resolved by the
- * caller (a server component checking feature_flags) and passed in, since
- * this component itself has no Supabase access.
+ * Status for production_conditions/commodity_prices/food_security is
+ * resolved by the caller (a server component checking feature_flags) and
+ * passed in, since this component itself has no Supabase access.
  */
 export function DomainPicker({
   productionConditionsStatus,
   commodityPricesStatus,
+  foodSecurityStatus,
 }: {
   productionConditionsStatus: DomainStatus;
   commodityPricesStatus: DomainStatus;
+  foodSecurityStatus: DomainStatus;
 }) {
   const domains: DomainEntry[] = [
     {
@@ -66,6 +68,14 @@ export function DomainPicker({
       icon: Sprout,
       href: "/production-conditions",
       status: productionConditionsStatus,
+    },
+    {
+      key: "food_security",
+      label: "Food security",
+      description: "Acute food insecurity (IPC/Cadre Harmonisé) classification by state (HDX HAPI).",
+      icon: HeartPulse,
+      href: "/food-security",
+      status: foodSecurityStatus,
     },
     {
       key: "disease_pest_outbreak",

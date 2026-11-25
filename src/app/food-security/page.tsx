@@ -12,7 +12,7 @@ export default async function FoodSecurityPage() {
   return (
     <div className="min-h-screen bg-brand-white">
       <DomainPageHeader title="Food security" />
-      <main className="mx-auto max-w-5xl px-4 py-8 lg:px-8">
+      <main className="mx-auto max-w-7xl px-4 py-8 lg:px-8">
         {enabled ? (
           <DomainCardErrorBoundary domainLabel="Food security">
             <FoodSecurityCard />

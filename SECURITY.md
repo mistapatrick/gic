@@ -4,9 +4,10 @@ GIC now handles real user accounts (super admin + scoped data-entry
 personnel) in addition to the public, account-less weather dashboard. The
 trust boundaries this document covers: (1) a bearer secret from the nightly
 GitHub Actions cron, (2) free-text messages typed into the "Ask the
-analyst" chat drawer, (3) third-party responses from the Open-Meteo,
-Gemini, and (as of Sub-phase 2) FAOSTAT, NBS, and World Bank RTFP APIs —
-JSON, zipped xlsx, and CSV respectively, (4) date-range/format query
+analyst" chat drawer, (3) third-party responses from Open-Meteo, the AI
+fallback chain (Gemini, and as of 2026-11-25 Groq), and (as of Sub-phase 2)
+FAOSTAT, NBS, and World Bank RTFP APIs — JSON, zipped xlsx, and CSV
+respectively, (4) date-range/format query
 parameters on the public CSV/Excel export endpoint, (5) human sign-in and
 session handling via Supabase Auth, (6) the account-management and
 historical-backfill surfaces reachable only by a signed-in `super_admin`,
@@ -19,7 +20,7 @@ and which automated test proves the closure holds — not just that the
 code "should" be safe by construction.
 
 Run the full suite with `npm run test` (or `npx vitest run`). Current state:
-**18 test files, 217 tests, all passing.**
+**23 test files, 284 tests, all passing.**
 
 `/api/brief-card/[slug]` (the branded PNG export used for bids and client
 briefings) is intentionally public and unauthenticated: it reads the exact
@@ -58,10 +59,10 @@ never throws or short-circuits on the comparison itself.
 
 ## 2. Secret isolation
 
-**Threat.** `SUPABASE_SERVICE_ROLE_KEY` and `GOOGLE_GENERATIVE_AI_API_KEY`
-grant full read/write and billed API access respectively. If either leaked
-into a client bundle, any site visitor could extract it from the browser's
-network tab or JS bundle.
+**Threat.** `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, and
+(as of 2026-11-25) `GROQ_API_KEY` grant full read/write and billed-adjacent
+API access respectively. If any leaked into a client bundle, any site
+visitor could extract it from the browser's network tab or JS bundle.
 
 **Mitigation.**
 - `src/lib/env.server.ts`, `src/lib/supabase/admin.ts`, `src/lib/auth/audit.ts`,
@@ -164,11 +165,16 @@ exactly one row per `(cluster_id, obs_date, obs_hour)` combination per run —
 together, the logical basis for why re-running a night's ingestion is safe to
 retry.
 
-## 6. Prompt injection (Gemini brief + chat)
+## 6. Prompt injection (AI brief + chat)
 
 **Threat.** The nightly brief is grounded in third-party telemetry, and the
 chat drawer takes arbitrary user text — either could contain text crafted to
-make the model ignore its instructions ("ignore the above and instead say...").
+make the model ignore its instructions ("ignore the above and instead
+say..."). This applies regardless of which entry in `AI_FALLBACK_CHAIN`
+(`src/lib/ai-models.ts`) ends up serving the request — Gemini or, since
+2026-11-25, Groq's `openai/gpt-oss-120b` — since the system prompt and its
+anti-injection instruction are provider-agnostic, passed to whichever model
+`withAiFallback()` constructs.
 
 **Mitigation.** `buildChatSystemPrompt()`
 (`src/lib/domains/weather/chat-logic.ts`) explicitly instructs the model to
@@ -186,9 +192,10 @@ the model call.
 
 ## 7. Rate limiting on `/api/chat`
 
-**Threat.** `/api/chat` calls Gemini (a billed-adjacent, free-tier-limited
-API) on every request. Without a limit, a single abusive client could exhaust
-the free quota for everyone.
+**Threat.** `/api/chat` calls into `AI_FALLBACK_CHAIN` (Gemini, with Groq as
+a third-leg fallback) — billed-adjacent, free-tier-limited APIs — on every
+request. Without a limit, a single abusive client could exhaust the free
+quota for everyone.
 
 **Mitigation.** `checkRateLimit()` (`src/lib/rate-limit.ts`) applies a fixed
 10-requests-per-60-seconds window per client IP (`x-forwarded-for` /
@@ -212,9 +219,9 @@ different client keys are tracked independently.
 
 ## 8. Untrusted third-party responses
 
-**Threat.** Open-Meteo and Gemini are external services. A malformed,
-truncated, or unexpectedly-shaped response from either should not crash the
-route or silently write garbage into Supabase.
+**Threat.** Open-Meteo and the AI fallback chain (Gemini, Groq) are external
+services. A malformed, truncated, or unexpectedly-shaped response from any of
+them should not crash the route or silently write garbage into Supabase.
 
 **Mitigation.**
 - `OpenMeteoResponseSchema` (Zod, `src/lib/domains/weather/ingest-logic.ts`)
@@ -225,10 +232,10 @@ route or silently write garbage into Supabase.
   endpoint.
 - All derived numeric values pass through `round()`/`nonNegative()` clamping
   before being written.
-- If the Gemini call fails or times out, the route degrades gracefully: it
-  still saves the night's verified telemetry and writes a neutral placeholder
-  summary rather than failing the whole ingestion because the AI narrative
-  step failed.
+- If the AI call fails or times out — including after exhausting every entry
+  in `AI_FALLBACK_CHAIN` — the route degrades gracefully: it still saves the
+  night's verified telemetry and writes a neutral placeholder summary rather
+  than failing the whole ingestion because the AI narrative step failed.
 - Every external call (Open-Meteo fetch, `generateObject`, `generateText`) is
   wrapped in `AbortSignal.timeout(...)` so an unreachable or hanging
   upstream can never hang the serverless function past Vercel's execution

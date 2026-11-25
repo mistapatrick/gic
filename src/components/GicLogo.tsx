@@ -9,7 +9,16 @@ import React from "react";
  * and a white telemetry waveform — agro-meteorological pulse, rain, and sun
  * in one mark, per the brand brief.
  */
-export function GicLogo({ className = "h-9 w-auto" }: { className?: string }) {
+export function GicLogo({
+  className = "h-9 w-auto",
+  showTagline = true,
+}: {
+  className?: string;
+  /** False in the AppShell's sidebar/header reuse — "23:59 WAT Observed
+   * Telemetry" is a weather-specific subtitle that would be misleading next
+   * to, say, the admin panel or the commodity-prices page. */
+  showTagline?: boolean;
+}) {
   return (
     <div className={`inline-flex items-center gap-2.5 select-none ${className}`}>
       <svg
@@ -63,9 +72,11 @@ export function GicLogo({ className = "h-9 w-auto" }: { className?: string }) {
             NG
           </span>
         </div>
-        <span className="text-[10px] sm:text-[11px] font-medium text-brand-ink-soft tracking-wide mt-0.5">
-          23:59 WAT Observed Telemetry
-        </span>
+        {showTagline ? (
+          <span className="text-[10px] sm:text-[11px] font-medium text-brand-ink-soft tracking-wide mt-0.5">
+            23:59 WAT Observed Telemetry
+          </span>
+        ) : null}
       </div>
     </div>
   );

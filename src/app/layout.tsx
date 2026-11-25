@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
+import { AppShell } from "@/components/AppShell";
+import { getCurrentUserRole } from "@/lib/supabase/server";
+import { isFeatureEnabled } from "@/lib/feature-flags";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -36,10 +39,50 @@ export default async function RootLayout({
   // proxy.ts's CSP too.
   await headers();
 
+  // Role and domain status feed the persistent AppShell nav (see that
+  // component's own comment — added 2026-11-25 to replace the old
+  // "every domain page is an island reachable only via its own back-link"
+  // layout). Both calls already fail safe on their own (isFeatureEnabled
+  // defaults to false; getCurrentUserRole returns null for "no session" or
+  // "no role row"), but the root layout wraps literally every page with no
+  // page-level error boundary above it — so an unexpected throw here (a
+  // missing env var, a transient network error) must not 500 the whole
+  // app. Worst case on failure: the shell renders as if signed out and
+  // every domain shows "preview" instead of "live" — a cosmetic
+  // degradation, never a crash.
+  let role: Awaited<ReturnType<typeof getCurrentUserRole>> = null;
+  try {
+    role = await getCurrentUserRole();
+  } catch {
+    role = null;
+  }
+
+  let domainStatus = { commodityPrices: false, productionConditions: false, foodSecurity: false };
+  try {
+    const [commodityPrices, productionConditions, foodSecurity] = await Promise.all([
+      isFeatureEnabled("commodity_prices"),
+      isFeatureEnabled("production_conditions"),
+      isFeatureEnabled("food_security"),
+    ]);
+    domainStatus = { commodityPrices, productionConditions, foodSecurity };
+  } catch {
+    // keep the all-false default above
+  }
+
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-brand-white text-brand-ink antialiased">
-        {children}
+        <AppShell
+          role={role?.role ?? null}
+          isAuthenticated={role !== null}
+          domainStatus={{
+            commodityPrices: domainStatus.commodityPrices ? "live" : "preview",
+            productionConditions: domainStatus.productionConditions ? "live" : "preview",
+            foodSecurity: domainStatus.foodSecurity ? "live" : "preview",
+          }}
+        >
+          {children}
+        </AppShell>
       </body>
     </html>
   );
