@@ -28,18 +28,24 @@ export const TRACKED_PRICE_COMMODITIES: string[] = PRODUCTION_TRACKED_COMMODITIE
 /**
  * Which price_type each source's figures actually represent. This is the
  * one piece of domain knowledge that keeps reconcileCommodityPrices from
- * averaging incompatible things: NBS and World Bank RTFP both measure
- * household/market retail prices (methodologically close enough to compare
- * directly), while AFEX is an exchange's own spot price for a traded
- * contract — a structurally different measurement that stays visible on
- * its own rather than getting blended into a "retail average".
+ * averaging incompatible things: NBS, World Bank RTFP, and FEWS NET all
+ * measure household/market retail prices (methodologically close enough to
+ * compare directly — FEWS NET's own price_type field is filtered to
+ * "retail" rows only before a row ever reaches this function, see
+ * fewsnet-ingest-logic.ts), while AFEX is an exchange's own spot price for
+ * a traded contract — a structurally different measurement that stays
+ * visible on its own rather than getting blended into a "retail average".
  */
-export function priceTypeForSource(source: CommodityPriceSource | "NBS" | "WORLD_BANK_RTFP"): PriceType {
+export function priceTypeForSource(
+  source: CommodityPriceSource | "NBS" | "WORLD_BANK_RTFP" | "FEWS_NET"
+): PriceType {
   switch (source) {
     case "NBS":
     case "NBS_HFP":
       return "retail";
     case "WORLD_BANK_RTFP":
+      return "retail";
+    case "FEWS_NET":
       return "retail";
     case "AFEX":
       return "exchange_spot";
