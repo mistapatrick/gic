@@ -1,6 +1,7 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import GicDashboard from "@/components/GicDashboard";
 import type { DailyObservedReport } from "@/lib/types";
+import { MIN_COMPLETE_CUTOFF_HOUR } from "@/lib/domains/weather/ingest-logic";
 
 // ISR fallback alongside Supabase Realtime — a visitor landing between
 // Realtime events still sees data no more than a minute stale.
@@ -27,12 +28,32 @@ export const revalidate = 60;
  */
 export default async function WeatherPage() {
   const supabase = getSupabaseBrowserClient();
-  const { data: latestReport } = await supabase
+
+  // Prefer the most recent ESSENTIALLY COMPLETE day. Without this, a nightly
+  // run that fires a few minutes late (crossing the 23:59 WAT day boundary —
+  // see MIN_COMPLETE_CUTOFF_HOUR's own comment) writes a near-empty row for
+  // the brand new day, and a naive "latest obs_date" query would show that
+  // sliver instead of yesterday's full day the instant it lands.
+  const { data: completeReport } = await supabase
     .from("daily_observed_reports")
     .select("*")
+    .gte("cutoff_hour_wat", MIN_COMPLETE_CUTOFF_HOUR)
     .order("obs_date", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  // Fall back to whatever exists at all — covers the very first ingestion
+  // ever, before any day has reached the "complete" threshold.
+  let latestReport = completeReport;
+  if (!latestReport) {
+    const { data: anyReport } = await supabase
+      .from("daily_observed_reports")
+      .select("*")
+      .order("obs_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    latestReport = anyReport;
+  }
 
   return <GicDashboard initialReport={latestReport as DailyObservedReport | null} />;
 }

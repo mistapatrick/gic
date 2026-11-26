@@ -2,12 +2,23 @@ name: Nightly 2359 WAT Observed Weather Ingestion
 
 on:
   schedule:
-    # 22:59 UTC == 23:59 WAT (GMT+1) — the last minute of the Lagos calendar
-    # day, so this run captures the full 00:00-23:59 WAT day in one pass.
+    # 22:45 UTC == 23:45 WAT (GMT+1). Deliberately NOT 23:59: GitHub's own
+    # docs say a scheduled workflow "may be delayed" under load, and 22:59
+    # (the last minute before a round UTC hour) is a high-traffic trigger
+    # minute for exactly that reason. A late firing crosses the 23:59 WAT
+    # day boundary — the ingest route reads the real clock at execution
+    # time (getLagosDateParts), not the scheduled time, so it would silently
+    # start logging the NEW day instead of finishing this one. 23:45 WAT
+    # still safely captures hour 23 (Open-Meteo's hourly array already has
+    # that hour's reading well before the hour ends) while leaving ~14
+    # minutes of margin against typical scheduling jitter. This is a
+    # mitigation, not a guarantee — see MIN_COMPLETE_CUTOFF_HOUR in
+    # src/lib/domains/weather/ingest-logic.ts for the fix that holds even if
+    # a run is still late enough to cross midnight.
     # Vercel Hobby cron has up to a ±59-minute jitter, so this job calls the
-    # ingest endpoint directly from GitHub Actions instead, which fires at
-    # the scheduled minute.
-    - cron: "59 22 * * *"
+    # ingest endpoint directly from GitHub Actions instead, which fires much
+    # closer to the scheduled minute.
+    - cron: "45 22 * * *"
   workflow_dispatch: # Allows a manual trigger / backfill run from the GitHub UI
 
 jobs:

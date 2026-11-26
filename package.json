@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "seed:super-admin": "tsx scripts/seed-super-admin.ts"
+    "seed:super-admin": "tsx scripts/seed-super-admin.ts",
+    "backfill:production-conditions-bulk": "NODE_OPTIONS=--conditions=react-server tsx scripts/run-production-conditions-bulk-backfill.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.122",

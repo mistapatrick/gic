@@ -49,6 +49,25 @@ export function getCutoffHour(currentHour: number): number {
   return Math.max(0, Math.min(currentHour, 23));
 }
 
+/**
+ * How many WAT hours a day needs before it counts as "essentially the full
+ * day" for display purposes, rather than "a sliver we just started ingesting."
+ *
+ * Exists because of a real failure mode: the nightly run is scheduled for
+ * 22:59 UTC (23:59 WAT — see .github/workflows/nightly-ingest.yml), and
+ * GitHub Actions' own docs say scheduled workflows "may be delayed" under
+ * load. If that run fires even a few minutes late, Lagos local time has
+ * already rolled over to the next calendar day by the time it executes —
+ * getLagosDateParts() reads the real clock at execution time, not the
+ * scheduled time, so a late run silently writes a near-empty row for the
+ * NEW day (cutoff_hour_wat near 0) instead of finishing the day it meant to
+ * close out. Both the dashboard's initial server fetch
+ * (src/app/weather/page.tsx) and its live Realtime subscription
+ * (src/components/GicDashboard.tsx) use this threshold so a stray
+ * just-started day never eclipses the last genuinely complete one.
+ */
+export const MIN_COMPLETE_CUTOFF_HOUR = 20;
+
 export function buildOpenMeteoUrl(clusters: ClusterRow[]): string {
   const lats = clusters.map((c) => c.latitude).join(",");
   const lons = clusters.map((c) => c.longitude).join(",");

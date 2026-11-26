@@ -1,0 +1,45 @@
+name: Weekly Sunday 2359 WAT Production Conditions Bulk Ingestion (direct)
+
+# Runs scripts/run-production-conditions-bulk-backfill.ts directly on this
+# runner instead of calling a Vercel API route. Why: that route
+# (/api/ingest/production-conditions-bulk, still present and still callable
+# manually — see weekly-production-conditions-bulk-ingest.yml) is capped at
+# maxDuration = 60, a hard ceiling on Vercel's free "Hobby" tier. FAOSTAT's
+# bulk file is a whole-world, whole-history export — meaningfully larger
+# than any other single download this app handles — and a real run timed
+# out inside that ceiling with 0 rows written. A GitHub Actions job has no
+# such limit (default 360 minutes), so the fetch+parse+write happens here
+# instead, reusing the exact same download/parse logic as the Vercel route
+# (see the script's own header comment).
+#
+# Same weekly Sunday slot as the route it replaces for scheduling purposes,
+# for the same reason that workflow gave: a day apart from the Saturday
+# production-conditions live-query cron purely so logs never interleave —
+# both write into the same idempotent production_conditions table and
+# cause no harm running back-to-back either way.
+on:
+  schedule:
+    - cron: "59 22 * * 0" # 22:59 UTC Sunday == 23:59 WAT (GMT+1) Sunday
+  workflow_dispatch: # Manual trigger / re-run from the GitHub UI
+
+jobs:
+  run-bulk-backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run FAOSTAT bulk backfill directly against Supabase
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run backfill:production-conditions-bulk

@@ -1,17 +1,18 @@
-name: Weekly Sunday 2359 WAT Production Conditions Bulk Ingestion
+name: Production Conditions Bulk Ingestion (manual, via Vercel route)
 
+# No longer runs on a schedule. This route's own first live run timed out
+# ("the operation was aborted due to timeout", 0 rows written) — FAOSTAT's
+# bulk file is a whole-world, whole-history export, genuinely too large for
+# a 45s fetch inside Vercel Hobby's 60s maxDuration ceiling (see
+# bulk-backfill.ts's own fetch-timeout comment, which predicted exactly
+# this). The scheduled weekly run now lives in
+# weekly-production-conditions-bulk-direct-ingest.yml instead, which calls
+# scripts/run-production-conditions-bulk-backfill.ts directly on the GitHub
+# Actions runner — no 60s ceiling there. This workflow is kept as a
+# manual-trigger fallback only (e.g. to re-exercise the Vercel route itself
+# after a deploy); both write into the same idempotent production_conditions
+# table, so running either (or both) is always safe.
 on:
-  schedule:
-    # 22:59 UTC Sunday == 23:59 WAT (GMT+1) Sunday — a day apart from the
-    # existing Saturday production-conditions live-query cron
-    # (weekly-production-conditions-ingest.yml) purely so the two routes'
-    # logs never interleave; they write to the same idempotent table and
-    # would cause no harm running back-to-back. FAOSTAT's bulk files are
-    # only republished after each annual data release, so "weekly" here is
-    # a cheap, harmless upper bound on staleness (same reasoning as the
-    # live-query route's own weekly cadence), not a sign the file changes
-    # that often.
-    - cron: "59 22 * * 0"
   workflow_dispatch: # Manual trigger from the GitHub UI
 
 jobs:

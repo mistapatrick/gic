@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -33,6 +33,7 @@ import { GicLogo } from "./GicLogo";
 import { AgentBriefPanel } from "./AgentBriefPanel";
 import { ExportPanel } from "./ExportPanel";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { MIN_COMPLETE_CUTOFF_HOUR } from "@/lib/domains/weather/ingest-logic";
 import { GEO_ZONES, type ClusterMetrics, type DailyObservedReport, type RiskFlagSeverity } from "@/lib/types";
 
 // Status styling for deterministic agronomic risk flags — see
@@ -88,6 +89,14 @@ export default function GicDashboard({
 
   const maxHour = report?.cutoff_hour_wat ?? 23;
 
+  // Mirrors `report` for the Realtime callback below, which is set up once
+  // ([] deps) and would otherwise only ever see the `initialReport` it
+  // closed over.
+  const reportRef = useRef<DailyObservedReport | null>(initialReport);
+  useEffect(() => {
+    reportRef.current = report;
+  }, [report]);
+
   // Live Supabase Realtime subscription for automatic 23:59 WAT refresh.
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -97,8 +106,26 @@ export default function GicDashboard({
         "postgres_changes",
         { event: "*", schema: "public", table: "daily_observed_reports" },
         (payload) => {
-          if (payload.new) {
-            setReport(payload.new as DailyObservedReport);
+          const incoming = payload.new as DailyObservedReport | undefined;
+          if (!incoming) return;
+
+          // Guard against a nightly run that fires a few minutes late and
+          // crosses the 23:59 WAT day boundary: it writes a near-empty row
+          // for the brand new day (cutoff_hour_wat near 0), and without this
+          // check this subscription would swap to that sliver the instant
+          // it lands, bumping yesterday's complete day off the screen. Only
+          // adopt the incoming row if it's essentially a full day, or if
+          // it's progress on the same day already shown (a backfill
+          // extending it further).
+          const current = reportRef.current;
+          const incomingIsComplete = (incoming.cutoff_hour_wat ?? 0) >= MIN_COMPLETE_CUTOFF_HOUR;
+          const sameDayProgressing =
+            !!current &&
+            incoming.obs_date === current.obs_date &&
+            (incoming.cutoff_hour_wat ?? 0) >= (current.cutoff_hour_wat ?? 0);
+
+          if (!current || incomingIsComplete || sameDayProgressing) {
+            setReport(incoming);
             setActiveHour(0);
           }
         }
