@@ -53,7 +53,7 @@ export function AgentBriefPanel({ report }: { report: DailyObservedReport | null
             {messages.length === 0 && (
               <p className="text-xs text-brand-muted">
                 Ask about today&apos;s observed rainfall, temperature, humidity, wind, or
-                sunshine across the 24 clusters — answers are grounded only in tonight&apos;s
+                sunshine across the 29 clusters — answers are grounded only in tonight&apos;s
                 telemetry.
               </p>
             )}

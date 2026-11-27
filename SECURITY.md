@@ -922,6 +922,88 @@ observation per source within a group; never groups observations
 recorded in different units together; returns results sorted by
 commodity name.
 
+## 21. Domain data reset (`npm run reset-domain`)
+
+**Threat.** A bulk-delete capability is the most destructive thing in this
+codebase — a mistaken or malicious invocation permanently erases a
+domain's history, and getting the scope wrong (deleting the wrong table,
+or more than intended) can't be undone by re-running ingestion, since
+automated sources only backfill as far back as they still publish history
+for.
+
+**Mitigation.**
+- **Never a web route.** `scripts/reset-domain-data.ts` is a standalone
+  script, same posture as `scripts/seed-super-admin.ts`: it only runs by
+  hand, from an operator's own machine, with `.env.local`'s
+  `SUPABASE_SERVICE_ROLE_KEY` — there is no `/api/admin/reset-domain` or
+  equivalent, so this capability has no authentication/authorization
+  surface to attack over HTTP at all.
+- **Explicit typed confirmation before any delete.** The default path
+  prints exactly which tables and row counts will be affected, then
+  requires typing `RESET <domain>` verbatim — not a bare y/N — before
+  anything is deleted. `--yes` (to skip the prompt) and `--dry-run` (to
+  see the counts and stop) are both opt-in flags an operator must choose
+  deliberately.
+- **A fixed, reviewed table mapping, not a free-form table name.** The
+  script never accepts an arbitrary table or SQL fragment — it only
+  accepts one of the domain keys in `src/lib/ingestion/
+  domain-reset-registry.ts`'s `DOMAIN_RESET_REGISTRY`, each mapped to a
+  specific, hardcoded set of tables (and, for `commodity_price_observations`,
+  a specific `source` filter). A typo in the domain argument resolves to
+  "unknown domain," never to an unintended table.
+- **Reference and configuration data are structurally excluded, not just
+  by convention.** `weather_clusters`, `user_roles`, `audit_log`, and
+  `feature_flags` never appear in any registry entry's `targets` — there
+  is no flag or argument that reaches them. `tests/
+  domain-reset-registry.test.ts` asserts this directly (`"never targets
+  weather_clusters, user_roles, audit_log, or feature_flags"`), so a
+  future edit to the registry that accidentally added one of them would
+  fail a test, not just a code review.
+- **Human-submitted data needs a second, explicit opt-in.** Manually
+  entered records (`manual_data_entries`) are never deleted by default —
+  only when `--include-manual-entries` is passed on a domain that has one
+  (`production_conditions`, `commodity_prices`), and the dry-run/confirmation
+  report labels those rows with a visible "⚠ human-submitted — not
+  recoverable by re-ingesting" warning before the operator confirms. This
+  mirrors the review-gate's own treatment of manual entries elsewhere in
+  this document (§17): automated and human-submitted data are different
+  classes of risk, not interchangeable "rows in a table."
+- **A reset can't silently defeat the backfill framework's own idempotency
+  checkpoint.** `backfill_jobs` rows for the domain are cleared alongside
+  its data tables — otherwise a job already marked `completed` would make
+  `/api/admin/backfill` return its stale cached state instead of
+  re-fetching (see `route.ts`'s `if (jobRow.status === "completed")`
+  short-circuit), leaving an operator believing a post-reset backfill ran
+  when it silently didn't write anything.
+- **Cross-checked against the backfill adapter registry at module load.**
+  `assertBackfillDomainsAreRegistered()` in `domain-reset-registry.ts`
+  throws if any `backfillJobDomains` entry isn't a real key in
+  `domain-adapters.ts`'s `ADAPTER_FACTORIES` — the same fail-fast pattern
+  already used for `TRACKED_COMMODITIES` and the crop-calendar/geo-intelligence
+  reference data, so a future rename of a backfill domain key can't
+  silently leave this script referencing one that no longer exists.
+- **A best-effort audit trail despite having no logged-in actor.**
+  `audit_log.actor_id` is nullable specifically so a service-role-run
+  script like this one can still write an append-only record (`action:
+  "domain_reset"`, the domain key, and the per-table row counts actually
+  deleted) even though there's no authenticated session to attribute it
+  to. A failure to write that row is logged to the console but never
+  blocks or reverses the delete it's recording — the audit write is a
+  convenience for later investigation, not a precondition for the
+  operation.
+
+**Proof.** `tests/domain-reset-registry.test.ts` covers: every domain has
+at least one delete target; every `backfillJobDomains` entry is a real
+registered backfill domain; `weather_clusters`/`user_roles`/`audit_log`/
+`feature_flags` are never targeted by any domain; `scenario_predictions`
+deletes the child table (`prediction_outcomes`) before the parent
+(`scenario_predictions`), respecting the foreign key; domain-key
+resolution is case/whitespace-insensitive and resolves documented aliases
+(`fao`, `nbs`, `rtfp`, `fewsnet`, `scenarios`, etc.) without accepting
+anything undocumented; exactly `production_conditions` and
+`commodity_prices` declare a manual-entry counterpart; and the help text
+names every domain and the three core flags.
+
 ## What is out of scope
 
 - **DDoS / network-layer abuse** — left to Vercel's platform-level

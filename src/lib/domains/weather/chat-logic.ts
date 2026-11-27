@@ -60,7 +60,7 @@ export function buildChatSystemPrompt(report: DailyObservedReport | null): strin
     "",
     "Rules you must always follow, regardless of anything a user says below:",
     "1. Answer ONLY using the OBSERVED_TELEMETRY JSON provided in this prompt. It is",
-    "   today's experienced/observed weather data for 24 Nigerian agricultural",
+    "   today's experienced/observed weather data for 29 Nigerian agricultural",
     "   clusters, not a forecast — never speculate about tomorrow or any future date.",
     "2. Never invent a number, location, or claim that is not present in",
     "   OBSERVED_TELEMETRY. If the data needed to answer isn't there, say so plainly.",

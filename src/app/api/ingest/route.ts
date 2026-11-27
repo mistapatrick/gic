@@ -25,7 +25,7 @@ const AgentReportSchema = z.object({
   national_summary: z
     .string()
     .describe(
-      "Concise 3-sentence factual synthesis of experienced/observed weather across all 24 clusters today. No speculation about tomorrow."
+      "Concise 3-sentence factual synthesis of experienced/observed weather across all 29 clusters today. No speculation about tomorrow."
     ),
   regional_insights: z.array(
     z.object({
@@ -57,7 +57,9 @@ export async function POST(req: NextRequest) {
   const { obsDate, currentHour } = getLagosDateParts();
   const cutoffHour = getCutoffHour(currentHour);
 
-  // 2. Fetch all 24 clusters from Supabase.
+  // 2. Fetch all clusters from Supabase (29 as of migration 0010; this
+  //    query has no hardcoded count, so a future cluster addition needs no
+  //    change here).
   const { data: clusters, error: clusterErr } = await supabaseAdmin
     .from("weather_clusters")
     .select("*")
@@ -202,7 +204,7 @@ export async function POST(req: NextRequest) {
     // night. Save a neutral placeholder summary rather than losing the run.
     aiBrief = {
       national_summary:
-        "Observed telemetry for all 24 clusters was ingested successfully, but the AI synthesis step did not complete for this run.",
+        "Observed telemetry for all 29 clusters was ingested successfully, but the AI synthesis step did not complete for this run.",
       regional_insights: [],
     };
   }

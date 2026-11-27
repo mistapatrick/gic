@@ -57,14 +57,22 @@ export default async function RootLayout({
     role = null;
   }
 
-  let domainStatus = { commodityPrices: false, productionConditions: false, foodSecurity: false };
+  let domainStatus = {
+    commodityPrices: false,
+    productionConditions: false,
+    foodSecurity: false,
+    geoIntelligence: false,
+    cropCalendar: false,
+  };
   try {
-    const [commodityPrices, productionConditions, foodSecurity] = await Promise.all([
+    const [commodityPrices, productionConditions, foodSecurity, geoIntelligence, cropCalendar] = await Promise.all([
       isFeatureEnabled("commodity_prices"),
       isFeatureEnabled("production_conditions"),
       isFeatureEnabled("food_security"),
+      isFeatureEnabled("geo_intelligence"),
+      isFeatureEnabled("crop_calendar"),
     ]);
-    domainStatus = { commodityPrices, productionConditions, foodSecurity };
+    domainStatus = { commodityPrices, productionConditions, foodSecurity, geoIntelligence, cropCalendar };
   } catch {
     // keep the all-false default above
   }
@@ -79,6 +87,8 @@ export default async function RootLayout({
             commodityPrices: domainStatus.commodityPrices ? "live" : "preview",
             productionConditions: domainStatus.productionConditions ? "live" : "preview",
             foodSecurity: domainStatus.foodSecurity ? "live" : "preview",
+            geoIntelligence: domainStatus.geoIntelligence ? "live" : "preview",
+            cropCalendar: domainStatus.cropCalendar ? "live" : "preview",
           }}
         >
           {children}

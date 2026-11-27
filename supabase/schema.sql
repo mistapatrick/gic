@@ -23,7 +23,8 @@
 --     overwrites the same row instead of creating duplicates.
 -- ============================================================================
 
--- 1. Static registry of the 24 agricultural clusters
+-- 1. Static registry of the agricultural clusters (24 seeded below; 5 more
+--    added by migration 0010, bringing the total to 29)
 create table if not exists public.weather_clusters (
   id serial primary key,
   slug text unique not null,
@@ -96,7 +97,7 @@ revoke insert, update, delete on public.observed_hourly from anon, authenticated
 revoke insert, update, delete on public.daily_observed_reports from anon, authenticated;
 
 -- ----------------------------------------------------------------------------
--- Seed: all 24 exact agricultural clusters
+-- Seed: the original 24 agricultural clusters (migration 0010 adds 5 more)
 -- ----------------------------------------------------------------------------
 insert into public.weather_clusters (slug, state_label, cluster_name, geo_zone, latitude, longitude) values
   ('anambra-ayamelum', 'Anambra', 'Ayamelum, Ogbaru, Anambra W.', 'South-East', 6.4512, 6.9124),

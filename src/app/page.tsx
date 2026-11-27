@@ -16,10 +16,18 @@ export const revalidate = 60;
  * comment for why).
  */
 export default async function HomePage() {
-  const [productionConditionsEnabled, commodityPricesEnabled, foodSecurityEnabled] = await Promise.all([
+  const [
+    productionConditionsEnabled,
+    commodityPricesEnabled,
+    foodSecurityEnabled,
+    geoIntelligenceEnabled,
+    cropCalendarEnabled,
+  ] = await Promise.all([
     isFeatureEnabled("production_conditions"),
     isFeatureEnabled("commodity_prices"),
     isFeatureEnabled("food_security"),
+    isFeatureEnabled("geo_intelligence"),
+    isFeatureEnabled("crop_calendar"),
   ]);
 
   // Built (Sub-phase 2) but not yet verified live in this deployment is
@@ -29,6 +37,8 @@ export default async function HomePage() {
   const productionConditionsStatus: DomainStatus = productionConditionsEnabled ? "live" : "preview";
   const commodityPricesStatus: DomainStatus = commodityPricesEnabled ? "live" : "preview";
   const foodSecurityStatus: DomainStatus = foodSecurityEnabled ? "live" : "preview";
+  const geoIntelligenceStatus: DomainStatus = geoIntelligenceEnabled ? "live" : "preview";
+  const cropCalendarStatus: DomainStatus = cropCalendarEnabled ? "live" : "preview";
 
   return (
     <div className="min-h-screen bg-brand-white">
@@ -61,6 +71,8 @@ export default async function HomePage() {
             productionConditionsStatus={productionConditionsStatus}
             commodityPricesStatus={commodityPricesStatus}
             foodSecurityStatus={foodSecurityStatus}
+            geoIntelligenceStatus={geoIntelligenceStatus}
+            cropCalendarStatus={cropCalendarStatus}
           />
         </div>
       </main>

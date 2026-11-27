@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed:super-admin": "tsx scripts/seed-super-admin.ts",
-    "backfill:production-conditions-bulk": "NODE_OPTIONS=--conditions=react-server tsx scripts/run-production-conditions-bulk-backfill.ts"
+    "backfill:production-conditions-bulk": "NODE_OPTIONS=--conditions=react-server tsx scripts/run-production-conditions-bulk-backfill.ts",
+    "reset-domain": "NODE_OPTIONS=--conditions=react-server tsx scripts/reset-domain-data.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.122",

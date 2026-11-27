@@ -20,7 +20,9 @@ export type ExportQuery = z.infer<typeof ExportQuerySchema>;
 
 // Bounds on the requested range, so a single export request can't try to pull
 // years of hourly data into one serverless invocation. Hourly is the much
-// denser dataset (24 clusters x 24 rows/day), so it gets a tighter cap than
+// denser dataset (29 clusters x 24 rows/day, up from 24 clusters as of
+// migration 0010 — a ~21% increase in daily row volume, not enough on its
+// own to warrant tightening the cap below), so it gets a tighter cap than
 // the already-aggregated daily summaries.
 export const MAX_HOURLY_RANGE_DAYS = 92; // ~3 months
 export const MAX_DAILY_RANGE_DAYS = 366; // ~1 year

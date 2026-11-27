@@ -2,7 +2,7 @@
 
 A Growthly Nexus Solutions Limited data product. **Phase 1 of GIC is
 agricultural intelligence** — continuously animated, **observed** (not
-forecast) weather telemetry across 24 Nigerian agricultural clusters,
+forecast) weather telemetry across 29 Nigerian agricultural clusters,
 refreshed nightly at exactly 23:59 WAT (GMT+1), plus the account/admin
 platform this document covers. GIC itself is broader than agriculture —
 Phase 2 adds SME and Investment Intelligence, Phase 3 adds Risk Intelligence
@@ -39,7 +39,7 @@ sells —
   Resilience & Resourcefulness studies and agricultural data-productization
   work, without re-keying anything by hand.
 
-One important honesty note: for most of these 24 clusters, Open-Meteo's
+One important honesty note: for most of these 29 clusters, Open-Meteo's
 "observed" data is a reanalysis/short-range model product (ERA5 / ERA5-Land
 / ECMWF IFS, blended against whatever stations exist nearby), not raw
 synoptic station telemetry. Phrase claims to funders/clients as
@@ -256,7 +256,8 @@ growthly-gic/
    statements:
    1. [`supabase/schema.sql`](./supabase/schema.sql) — creates
       `weather_clusters`, `observed_hourly`, `daily_observed_reports`, public
-      read-only RLS, and seeds all 24 clusters.
+      read-only RLS, and seeds the original 24 clusters (migration 0010
+      below adds 5 more, for 29 total).
    2. [`supabase/migrations/0001_full_day_ingest_cutoff.sql`](./supabase/migrations/0001_full_day_ingest_cutoff.sql)
       — widens `cutoff_hour_wat` to allow up to 23.
    3. [`supabase/migrations/0002_auth_roles_audit.sql`](./supabase/migrations/0002_auth_roles_audit.sql)
@@ -276,6 +277,27 @@ growthly-gic/
       — adds `commodity_price_observations` (NBS + World Bank RTFP, public
       read-only). AFEX stays on `manual_data_entries` from migration 0004 —
       no schema change needed for it. Needed before Step 7 below.
+   7. [`supabase/migrations/0006_fewsnet_and_food_security.sql`](./supabase/migrations/0006_fewsnet_and_food_security.sql)
+      — adds FEWS NET as a third `commodity_prices` source and a new
+      `food_security` domain (HDX HAPI IPC/Cadre Harmonisé classification).
+      Both feature-flagged off until reviewed.
+   8. [`supabase/migrations/0007_production_conditions_stocks_and_slaughter.sql`](./supabase/migrations/0007_production_conditions_stocks_and_slaughter.sql)
+      — widens `production_conditions.metric` to accept the two
+      livestock-only FAOSTAT elements (`stocks`,
+      `producing_animals_slaughtered`).
+   9. [`supabase/migrations/0008_scenario_predictions.sql`](./supabase/migrations/0008_scenario_predictions.sql)
+      — adds `scenario_predictions` and `prediction_outcomes`, the
+      foundation for Sub-phase 6's Modelling/Adaptation/Intelligence
+      scenario engine.
+   10. [`supabase/migrations/0009_super_admin_domain_bypass.sql`](./supabase/migrations/0009_super_admin_domain_bypass.sql)
+      — lets a `super_admin` pass `has_domain_scope()` checks directly, so
+      they can submit manual entries themselves, not just assign the role
+      to others.
+   11. [`supabase/migrations/0010_add_weather_clusters_kaduna_sokoto_kogi_kwara_bayelsa.sql`](./supabase/migrations/0010_add_weather_clusters_kaduna_sokoto_kogi_kwara_bayelsa.sql)
+      — adds 5 weather clusters (Kaduna, Sokoto, Kogi, Kwara, Bayelsa),
+      bringing the total from 24 to 29. New clusters get nightly ingestion
+      automatically; their historical weather still needs one manual
+      backfill run each from the admin Backfill panel.
 3. **Authentication → Providers**: confirm Email is enabled (it is by
    default). **Authentication → URL Configuration**: set the Site URL to
    your eventual production domain once you have it (Step 4).
@@ -501,6 +523,49 @@ last one's zero-parameter `fetchChunk` to satisfy the framework's wider
 `(start, end) => Promise<unknown>` interface unchanged). A future domain
 with its own historical source does the same. See `SECURITY.md` for the
 authorization and rate-limiting details.
+
+## Resetting a domain's data
+
+To empty one domain's ingested data and start fresh — say, weather looks
+wrong after a bug fix, or you want to re-run FAOSTAT from a clean slate —
+use `npm run reset-domain`, not a manual SQL `DELETE`. It's a standalone
+script, run by hand from your own machine with `.env.local`'s
+`SUPABASE_SERVICE_ROLE_KEY` (same posture as `seed:super-admin` — never an
+API route, never reachable over the web), and it asks for a typed
+confirmation before deleting anything:
+
+```bash
+npm run reset-domain -- --list                          # see every domain and what it touches
+npm run reset-domain -- weather --dry-run                # just show row counts, delete nothing
+npm run reset-domain -- weather                           # prompts: type "RESET weather" to confirm
+npm run reset-domain -- production_conditions             # aliases work too: "fao", "faostat"
+npm run reset-domain -- commodity_prices_nbs --yes         # skip the prompt (e.g. scripted use)
+```
+
+It clears the domain's own table(s) — `weather` empties
+`observed_hourly`/`daily_observed_reports`, `production_conditions` empties
+the FAOSTAT table, `commodity_prices_nbs`/`commodity_prices_worldbank_rtfp`/
+`commodity_prices_fewsnet` each clear only their own source's rows out of
+`commodity_price_observations` (or use the bare `commodity_prices` domain
+to clear all three automated sources at once), `food_security` empties
+`food_security_observations`, and `scenario_predictions` clears the AI
+scenario tables. It also clears the matching `backfill_jobs` row(s), since
+a job already marked "completed" makes the admin Backfill panel silently
+no-op on the same date range afterwards — without that, re-running a
+backfill after a reset would look like it worked but write nothing back.
+
+It deliberately does **not** touch `weather_clusters` (cluster reference
+data, not an observation), `user_roles`/`audit_log`/`feature_flags` (app
+configuration), or manually entered records in `manual_data_entries` —
+those are human-submitted and can't be "started fresh" by re-running a
+cron. Pass `--include-manual-entries` on `production_conditions` or
+`commodity_prices` only if you deliberately want those gone too; the
+script prints a separate warning for them before you confirm.
+
+After a reset, repopulate the domain from `/admin`'s Historical backfill
+panel (or, for `production_conditions`, also
+`npm run backfill:production-conditions-bulk` /
+the matching GitHub Actions workflow).
 
 ## Troubleshooting
 

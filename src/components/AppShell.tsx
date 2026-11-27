@@ -12,6 +12,8 @@ import {
   LayoutDashboard,
   ShieldCheck,
   LogIn,
+  MapPin,
+  CalendarDays,
 } from "lucide-react";
 import { GicLogo } from "./GicLogo";
 import { SignOutButton } from "./SignOutButton";
@@ -52,6 +54,8 @@ export interface AppShellProps {
     commodityPrices: DomainStatus;
     productionConditions: DomainStatus;
     foodSecurity: DomainStatus;
+    geoIntelligence: DomainStatus;
+    cropCalendar: DomainStatus;
   };
   children: React.ReactNode;
 }
@@ -97,6 +101,22 @@ function buildNavItems(props: AppShellProps): NavItem[] {
       href: "/food-security",
       icon: HeartPulse,
       status: props.domainStatus.foodSecurity,
+      sidebarOnly: true,
+    },
+    {
+      key: "geo_intelligence",
+      label: "Geo intelligence",
+      href: "/geo-intelligence",
+      icon: MapPin,
+      status: props.domainStatus.geoIntelligence,
+      sidebarOnly: true,
+    },
+    {
+      key: "crop_calendar",
+      label: "Crop calendar",
+      href: "/crop-calendar",
+      icon: CalendarDays,
+      status: props.domainStatus.cropCalendar,
       sidebarOnly: true,
     },
     accountItem,

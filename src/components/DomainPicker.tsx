@@ -1,6 +1,17 @@
 import React from "react";
 import Link from "next/link";
-import { CloudRain, Tag, Sprout, Bug, PawPrint, Package, HeartPulse, type LucideIcon } from "lucide-react";
+import {
+  CloudRain,
+  Tag,
+  Sprout,
+  Bug,
+  PawPrint,
+  Package,
+  HeartPulse,
+  MapPin,
+  CalendarDays,
+  type LucideIcon,
+} from "lucide-react";
 
 export type DomainStatus = "live" | "preview" | "planned";
 
@@ -39,16 +50,20 @@ export function DomainPicker({
   productionConditionsStatus,
   commodityPricesStatus,
   foodSecurityStatus,
+  geoIntelligenceStatus,
+  cropCalendarStatus,
 }: {
   productionConditionsStatus: DomainStatus;
   commodityPricesStatus: DomainStatus;
   foodSecurityStatus: DomainStatus;
+  geoIntelligenceStatus: DomainStatus;
+  cropCalendarStatus: DomainStatus;
 }) {
   const domains: DomainEntry[] = [
     {
       key: "weather",
       label: "Weather",
-      description: "Hourly observed telemetry across 24 Nigerian agricultural clusters.",
+      description: "Hourly observed telemetry across 29 Nigerian agricultural clusters.",
       icon: CloudRain,
       href: "/weather",
       status: "live",
@@ -78,6 +93,22 @@ export function DomainPicker({
       status: foodSecurityStatus,
     },
     {
+      key: "geo_intelligence",
+      label: "Geo intelligence",
+      description: "Pick one of 29 agricultural clusters — its rainfall history, plus national production and market context for its crops.",
+      icon: MapPin,
+      href: "/geo-intelligence",
+      status: geoIntelligenceStatus,
+    },
+    {
+      key: "crop_calendar",
+      label: "Crop calendar",
+      description: "Typical planting/harvest windows by crop and geo-zone, paired with each zone's recently observed rainfall.",
+      icon: CalendarDays,
+      href: "/crop-calendar",
+      status: cropCalendarStatus,
+    },
+    {
       key: "disease_pest_outbreak",
       label: "Disease & pest outbreak",
       description: "Livestock, aquatic, and crop disease/pest alerts (WAHIS and FAO/CropWatch).",
@@ -88,7 +119,7 @@ export function DomainPicker({
     {
       key: "animals",
       label: "Animals",
-      description: "Livestock and fishery production — crop calendar, catfish, tilapia, and more.",
+      description: "Livestock and fishery production — catfish, tilapia, and more.",
       icon: PawPrint,
       href: null,
       status: "planned",

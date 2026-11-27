@@ -275,11 +275,15 @@ export default function GicDashboard({
             only ones visible without scrolling the old pill bar or opening
             the old zone <select>, and nothing on screen said otherwise.
             This section exists specifically to make "there are 6 zones,
-            24 clusters, nationwide" impossible to miss on first load. */}
+            29 clusters, nationwide" impossible to miss on first load.
+            Updated 2026-11-27: migration 0010 added Kaduna, Sokoto, Kogi,
+            Kwara, and Bayelsa clusters (24 -> 29); this count is read from
+            the literal copy below, not computed, so any future cluster
+            addition needs the same text updated here. */}
         <section className="rounded-xl border border-brand-grey-green bg-brand-white p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-brand-ink-soft">
             <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-teal" />
-            Nigeria-wide — 24 agricultural clusters across all 6 geopolitical zones. Tap a zone to
+            Nigeria-wide — 29 agricultural clusters across all 6 geopolitical zones. Tap a zone to
             explore it:
           </p>
           <div className="flex flex-wrap gap-1.5">
