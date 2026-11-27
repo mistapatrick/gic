@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { MIN_COMPLETE_CUTOFF_HOUR } from "@/lib/domains/weather/ingest-logic";
 import type { ClusterMetrics, DailyObservedReport, RiskFlagSeverity } from "@/lib/types";
 
 /**
@@ -117,6 +118,22 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
               <span style={{ fontSize: 18, color: "#3f5c5c", marginTop: 4 }}>
                 {cluster.geo_zone} Zone • Observed telemetry for {report.obs_date}, through{" "}
                 {String(report.cutoff_hour_wat).padStart(2, "0")}:00 WAT
+              </span>
+              <span
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  marginTop: 8,
+                  alignSelf: "flex-start",
+                  color: report.cutoff_hour_wat >= MIN_COMPLETE_CUTOFF_HOUR ? "#005a5a" : "#8a5a00",
+                  backgroundColor: report.cutoff_hour_wat >= MIN_COMPLETE_CUTOFF_HOUR ? "#d4f6e5" : "#fdf0dc",
+                  borderRadius: 14,
+                  padding: "4px 12px",
+                }}
+              >
+                {report.cutoff_hour_wat >= MIN_COMPLETE_CUTOFF_HOUR
+                  ? "Full day reporting period"
+                  : "Partial day — ingestion was still in progress at this cutoff"}
               </span>
             </div>
 

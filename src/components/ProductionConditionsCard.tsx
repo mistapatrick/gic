@@ -10,9 +10,16 @@ import {
   getCropEmoji,
 } from "@/lib/domains/production-conditions/crop-emoji";
 
+type ProductionMetric =
+  | "production_quantity"
+  | "yield"
+  | "area_harvested"
+  | "stocks"
+  | "producing_animals_slaughtered";
+
 interface ProductionRow {
   commodity: string;
-  metric: "production_quantity" | "yield" | "area_harvested";
+  metric: ProductionMetric;
   value: number;
   unit: string;
   year: number;
@@ -23,14 +30,30 @@ interface ProductionBrief {
   standout_insights: string[];
 }
 
+interface SecondaryStat {
+  label: string;
+  value: number;
+  unit: string;
+}
+
 interface CommodityCardData {
   commodity: string;
   value: number;
   unit: string;
   year: number;
-  yieldValue: number | null;
-  yieldUnit: string | null;
+  secondaryStats: SecondaryStat[];
 }
+
+// Secondary stats shown under the headline production figure, in display
+// order. "stocks" and "producing_animals_slaughtered" only ever have values
+// for the two livestock-product commodities (Cattle meat, Cow milk) — see
+// ingest-logic.ts's ELEMENT_METRIC_RULES — so most crop cards simply show
+// Yield and nothing else.
+const SECONDARY_METRICS: Array<{ metric: ProductionMetric; label: string }> = [
+  { metric: "yield", label: "Yield" },
+  { metric: "stocks", label: "Stocks" },
+  { metric: "producing_animals_slaughtered", label: "Slaughtered" },
+];
 
 /**
  * Public dashboard card for the production_conditions domain (FAOSTAT —
@@ -75,7 +98,13 @@ export function ProductionConditionsCard() {
         const { data, error: fetchError } = await supabase
           .from("production_conditions")
           .select("commodity, metric, value, unit, year")
-          .in("metric", ["production_quantity", "yield", "area_harvested"])
+          .in("metric", [
+            "production_quantity",
+            "yield",
+            "area_harvested",
+            "stocks",
+            "producing_animals_slaughtered",
+          ])
           .eq("region", "National")
           .order("year", { ascending: false });
 
@@ -113,8 +142,9 @@ export function ProductionConditionsCard() {
   if (enabled === null || enabled === false) return null;
 
   // Keep only each commodity's most recent year, independently per metric
-  // (production_quantity, yield and area_harvested don't always share the
-  // same latest year in FAOSTAT's release schedule).
+  // (production_quantity, yield, area_harvested, stocks and
+  // producing_animals_slaughtered don't always share the same latest year
+  // in FAOSTAT's release schedule).
   const latestByCommodityMetric = new Map<string, ProductionRow>();
   for (const row of rows) {
     const key = `${row.commodity}__${row.metric}`;
@@ -129,16 +159,14 @@ export function ProductionConditionsCard() {
       value: row.value,
       unit: row.unit,
       year: row.year,
-      yieldValue: null,
-      yieldUnit: null,
+      secondaryStats: [],
     });
   }
-  for (const row of latestByCommodityMetric.values()) {
-    if (row.metric !== "yield") continue;
-    const card = cards.get(row.commodity);
-    if (card) {
-      card.yieldValue = row.value;
-      card.yieldUnit = row.unit;
+  for (const { metric, label } of SECONDARY_METRICS) {
+    for (const row of latestByCommodityMetric.values()) {
+      if (row.metric !== metric) continue;
+      const card = cards.get(row.commodity);
+      if (card) card.secondaryStats.push({ label, value: row.value, unit: row.unit });
     }
   }
 
@@ -230,11 +258,12 @@ function CommodityCard({ card }: { card: CommodityCardData }) {
         {card.value.toLocaleString()}{" "}
         <span className="text-xs font-medium text-brand-ink-soft">{card.unit}</span>
       </div>
-      <div className="mt-0.5 text-[11px] text-brand-ink-soft">
-        {card.year}
-        {card.yieldValue !== null &&
-          ` • Yield ${card.yieldValue.toLocaleString()} ${card.yieldUnit}`}
-      </div>
+      <div className="mt-0.5 text-[11px] text-brand-ink-soft">{card.year}</div>
+      {card.secondaryStats.map((stat) => (
+        <div key={stat.label} className="text-[11px] text-brand-ink-soft">
+          {stat.label}: {stat.value.toLocaleString()} {stat.unit}
+        </div>
+      ))}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { getCurrentUserRole } from "@/lib/supabase/server";
 import { writeAuditLog } from "@/lib/auth/audit";
 import {
   extractCsvRowsFromZipOrCsv,
-  writeProductionConditionsBulkChunk,
+  writeProductionConditionsBulkChunkWithDiagnostics,
 } from "@/lib/domains/production-conditions/bulk-backfill";
 
 /**
@@ -71,9 +71,12 @@ export async function POST(request: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer());
 
   let rowsWritten: number;
+  let skippedCommodities: { itemName: string; count: number }[];
   try {
     const csvRows = extractCsvRowsFromZipOrCsv(buffer);
-    rowsWritten = await writeProductionConditionsBulkChunk(csvRows);
+    const result = await writeProductionConditionsBulkChunkWithDiagnostics(csvRows);
+    rowsWritten = result.rowsWritten;
+    skippedCommodities = result.skippedCommodities;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to parse/ingest uploaded file";
     await writeAuditLog({
@@ -86,13 +89,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 422 });
   }
 
+  // Surfaced in the audit log too, not just the response — so a skip that
+  // nobody notices in the UI in the moment is still visible later when
+  // auditing what an upload actually did. See bulk-ingest-logic.ts's
+  // SkippedCommodityCount for why this exists: before it, an upload for an
+  // untracked commodity (e.g. ginger/plantain/banana/cashew before they
+  // were added to TRACKED_COMMODITIES) reported "success" with 0 rows and
+  // no trace of why.
   await writeAuditLog({
     actorId: role.userId,
     action: "upload_production_conditions_bulk",
     targetTable: "production_conditions",
     outcome: "success",
-    changedFields: { fileName: file.name, fileSize: file.size, rowsWritten },
+    changedFields: { fileName: file.name, fileSize: file.size, rowsWritten, skippedCommodities },
   });
 
-  return NextResponse.json({ status: "success", rows_written: rowsWritten });
+  return NextResponse.json({
+    status: "success",
+    rows_written: rowsWritten,
+    skipped_commodities: skippedCommodities,
+  });
 }

@@ -11,10 +11,21 @@ import { useRef, useState } from "react";
  * FAOSTAT's bulk-download page, or an already-unzipped .csv — the route
  * itself detects which one it got.
  */
+interface SkippedCommodity {
+  itemName: string;
+  count: number;
+}
+
+interface UploadResult {
+  fileName: string;
+  rowsWritten: number;
+  skippedCommodities: SkippedCommodity[];
+}
+
 export function ProductionConditionsBulkUploadPanel() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ fileName: string; rowsWritten: number } | null>(null);
+  const [result, setResult] = useState<UploadResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -41,7 +52,11 @@ export function ProductionConditionsBulkUploadPanel() {
         setError(body.error ?? "Upload failed");
         return;
       }
-      setResult({ fileName: file.name, rowsWritten: body.rows_written });
+      setResult({
+        fileName: file.name,
+        rowsWritten: body.rows_written,
+        skippedCommodities: body.skipped_commodities ?? [],
+      });
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch {
       setError("Upload failed — check your connection and try again");
@@ -89,11 +104,38 @@ export function ProductionConditionsBulkUploadPanel() {
       )}
 
       {result && (
-        <div className="mt-4 rounded-md bg-brand-mint-pale px-4 py-3 text-sm text-brand-ink">
+        <div
+          className={`mt-4 rounded-md px-4 py-3 text-sm ${
+            result.rowsWritten === 0
+              ? "bg-amber-50 text-amber-800"
+              : "bg-brand-mint-pale text-brand-ink"
+          }`}
+        >
           <p>
-            <span className="font-medium">{result.fileName}</span> ingested successfully ·{" "}
+            <span className="font-medium">{result.fileName}</span>{" "}
+            {result.rowsWritten === 0 ? "processed, but wrote 0 rows" : "ingested"} ·{" "}
             {result.rowsWritten.toLocaleString()} rows written
           </p>
+          {result.skippedCommodities.length > 0 && (
+            <div className="mt-2">
+              <p className="font-medium">
+                {result.skippedCommodities.reduce((sum, c) => sum + c.count, 0).toLocaleString()} cell
+                {result.skippedCommodities.reduce((sum, c) => sum + c.count, 0) === 1 ? "" : "s"} skipped —
+                these item names aren&apos;t on the tracked-commodity list yet:
+              </p>
+              <ul className="mt-1 list-inside list-disc">
+                {result.skippedCommodities.map((c) => (
+                  <li key={c.itemName}>
+                    &ldquo;{c.itemName}&rdquo; — {c.count.toLocaleString()} cell{c.count === 1 ? "" : "s"}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs opacity-80">
+                Ask for these to be added to the tracked-commodity list (with a sample FAOSTAT export
+                confirming the exact item name) if this data should appear on Produce Stats.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

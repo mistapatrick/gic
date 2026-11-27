@@ -42,6 +42,22 @@ describe("buildCompactProductionTelemetry", () => {
   it("returns an empty string for no rows", () => {
     expect(buildCompactProductionTelemetry([])).toBe("");
   });
+
+  it("labels the livestock-only stocks and producing_animals_slaughtered metrics", () => {
+    const rows: ProductionBriefRow[] = [
+      { commodity: "Cattle meat", metric: "stocks", value: 20_000_000, unit: "Head", year: 2023 },
+      {
+        commodity: "Cattle meat",
+        metric: "producing_animals_slaughtered",
+        value: 1_200_000,
+        unit: "Head",
+        year: 2023,
+      },
+    ];
+    const text = buildCompactProductionTelemetry(rows);
+    expect(text).toContain("stocks 20,000,000 Head (2023)");
+    expect(text).toContain("producing animals/slaughtered 1,200,000 Head (2023)");
+  });
 });
 
 describe("buildProductionBriefPrompt", () => {

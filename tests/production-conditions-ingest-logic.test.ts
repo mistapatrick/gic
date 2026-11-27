@@ -56,7 +56,39 @@ describe("matchCommodity", () => {
     expect(matchCommodity("Maize (corn)")).toBe("Maize");
   });
   it("returns null for an untracked item", () => {
-    expect(matchCommodity("Bananas")).toBeNull();
+    expect(matchCommodity("Sugar cane")).toBeNull();
+  });
+  it("matches the four commodities added from the user's 2026-11-26 FAOSTAT export", () => {
+    expect(matchCommodity("Bananas")).toBe("Bananas");
+    expect(matchCommodity("Cashew nuts, in shell")).toBe("Cashew nuts");
+    expect(matchCommodity("Cashew nuts")).toBe("Cashew nuts");
+    expect(matchCommodity("Ginger, raw")).toBe("Ginger");
+    expect(matchCommodity("Ginger")).toBe("Ginger");
+    expect(matchCommodity("Plantains and cooking bananas")).toBe("Plantains");
+    expect(matchCommodity("Plantains")).toBe("Plantains");
+  });
+  it("matches the 13 commodities added 2026-11-27 from the user's plain-language crop list", () => {
+    expect(matchCommodity("Cashewapple")).toBe("Cashewapple");
+    expect(matchCommodity("Karite nuts (sheanuts)")).toBe("Shea nuts");
+    expect(matchCommodity("Carrots and turnips")).toBe("Carrots and turnips");
+    expect(matchCommodity("Cabbages")).toBe("Cabbages");
+    expect(matchCommodity("Lettuce and chicory")).toBe("Lettuce and chicory");
+    expect(matchCommodity("Watermelons")).toBe("Watermelons");
+    expect(matchCommodity("Melonseed")).toBe("Melonseed");
+    expect(matchCommodity("Tomatoes")).toBe("Tomatoes");
+    expect(matchCommodity("Chillies and peppers, green")).toBe("Chillies and peppers, green");
+    expect(matchCommodity("Sweet potatoes")).toBe("Sweet potatoes");
+    expect(matchCommodity("Potatoes")).toBe("Potatoes");
+    expect(matchCommodity("Pineapples")).toBe("Pineapples");
+    expect(matchCommodity("Oranges")).toBe("Oranges");
+  });
+  it("does not let 'Sweet potatoes' collide with the plain 'Potatoes' entry", () => {
+    expect(matchCommodity("Sweet potatoes")).toBe("Sweet potatoes");
+    expect(matchCommodity("Potatoes")).toBe("Potatoes");
+  });
+  it("still returns null for fluted pumpkin leaves — no FAOSTAT item exists for it", () => {
+    expect(matchCommodity("Fluted pumpkin leaves")).toBeNull();
+    expect(matchCommodity("Telfairia occidentalis")).toBeNull();
   });
 });
 
@@ -70,8 +102,14 @@ describe("matchMetric", () => {
   it("maps Area harvested to area_harvested", () => {
     expect(matchMetric("Area harvested")).toBe("area_harvested");
   });
+  it("maps Stocks to stocks", () => {
+    expect(matchMetric("Stocks")).toBe("stocks");
+  });
+  it("maps Producing Animals/Slaughtered to producing_animals_slaughtered", () => {
+    expect(matchMetric("Producing Animals/Slaughtered")).toBe("producing_animals_slaughtered");
+  });
   it("returns null for an untracked element", () => {
-    expect(matchMetric("Stocks")).toBeNull();
+    expect(matchMetric("Prices")).toBeNull();
   });
 });
 
@@ -102,12 +140,12 @@ describe("parseFaostatRecords", () => {
   });
 
   it("skips a record whose item isn't a tracked commodity", () => {
-    const untracked = { ...NIGERIA_MAIZE_PRODUCTION, Item: "Bananas" };
+    const untracked = { ...NIGERIA_MAIZE_PRODUCTION, Item: "Sugar cane" };
     expect(parseFaostatRecords(faostatResponse([untracked]), FAOSTAT_AREA_CODE_NIGERIA)).toEqual([]);
   });
 
   it("skips a record whose element isn't a tracked metric", () => {
-    const untracked = { ...NIGERIA_MAIZE_PRODUCTION, Element: "Stocks" };
+    const untracked = { ...NIGERIA_MAIZE_PRODUCTION, Element: "Prices" };
     expect(parseFaostatRecords(faostatResponse([untracked]), FAOSTAT_AREA_CODE_NIGERIA)).toEqual([]);
   });
 

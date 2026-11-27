@@ -194,8 +194,37 @@ export default function GicDashboard({
           <GicLogo />
 
           <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
-            <span className="rounded-full border border-brand-teal/30 bg-brand-mint-pale px-3 py-1 text-xs font-semibold text-brand-teal">
-              {report.obs_date} • {String(activeHour).padStart(2, "0")}:00 WAT
+            {/* Reporting period (what the stored data actually covers) and
+                the animation's current scrub position used to be merged
+                into one label ("{obs_date} • {activeHour}:00 WAT"), which
+                looked exactly like "data as of this hour" even when the
+                scrubber had looped back to an earlier hour of a fully
+                complete day. Split into two distinct badges 2026-11-26 so
+                neither reads as the other — same fix applies whether the
+                underlying row came from the nightly auto-ingest cron or a
+                manual admin backfill, since both write this same shape of
+                row to daily_observed_reports. */}
+            <span
+              title={`Observed telemetry for ${report.obs_date}, covering 00:00 through ${String(
+                report.cutoff_hour_wat
+              ).padStart(2, "0")}:00 WAT`}
+              className="rounded-full border border-brand-teal/30 bg-brand-mint-pale px-3 py-1 text-xs font-semibold text-brand-teal"
+            >
+              Reporting period: {report.obs_date} · through {String(report.cutoff_hour_wat).padStart(2, "0")}:00 WAT
+            </span>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                (report.cutoff_hour_wat ?? 0) >= MIN_COMPLETE_CUTOFF_HOUR
+                  ? "bg-status-info-bg text-status-info"
+                  : "bg-status-watch-bg text-status-watch"
+              }`}
+            >
+              {(report.cutoff_hour_wat ?? 0) >= MIN_COMPLETE_CUTOFF_HOUR
+                ? "Full day"
+                : "Partial day — still ingesting"}
+            </span>
+            <span className="rounded-full border border-brand-grey-green bg-brand-white px-2.5 py-1 text-[11px] font-medium text-brand-ink-soft">
+              Viewing: {String(activeHour).padStart(2, "0")}:00
             </span>
             <div className="flex items-center gap-1.5">
               <button
@@ -237,7 +266,54 @@ export default function GicDashboard({
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 lg:px-8">
-        {/* Location & geo-zone selector */}
+        {/* Zone navigation — ALL 6 geopolitical zones always visible at
+            once, as equally-weighted buttons, never hidden in a <select>
+            or past a horizontal-scroll edge. Added 2026-11-26: test users
+            reported assuming this dashboard only covered South-East and
+            South-South — those two zones are seeded first in
+            supabase/schema.sql's weather_clusters insert, so they were the
+            only ones visible without scrolling the old pill bar or opening
+            the old zone <select>, and nothing on screen said otherwise.
+            This section exists specifically to make "there are 6 zones,
+            24 clusters, nationwide" impossible to miss on first load. */}
+        <section className="rounded-xl border border-brand-grey-green bg-brand-white p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-brand-ink-soft">
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-teal" />
+            Nigeria-wide — 24 agricultural clusters across all 6 geopolitical zones. Tap a zone to
+            explore it:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSelectedZone("ALL")}
+              aria-pressed={selectedZone === "ALL"}
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                selectedZone === "ALL"
+                  ? "bg-brand-teal text-brand-white shadow"
+                  : "border border-brand-grey-green bg-brand-white text-brand-ink-soft hover:bg-brand-mint-pale"
+              }`}
+            >
+              All Zones (24)
+            </button>
+            {GEO_ZONES.map((z) => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => setSelectedZone(z)}
+                aria-pressed={selectedZone === z}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  selectedZone === z
+                    ? "bg-brand-teal text-brand-white shadow"
+                    : "border border-brand-grey-green bg-brand-white text-brand-ink-soft hover:bg-brand-mint-pale"
+                }`}
+              >
+                {z.replace("-", " ")} (4)
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Location detail & cluster selector, within the zone(s) chosen above */}
         <section className="rounded-xl border border-brand-grey-green bg-brand-mint-pale/40 p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-2">
@@ -265,20 +341,9 @@ export default function GicDashboard({
               </a>
               <ExportPanel latestObsDate={report.obs_date} />
               <select
-                value={selectedZone}
-                onChange={(e) => setSelectedZone(e.target.value)}
-                className="rounded-lg border border-brand-grey-green bg-brand-white px-3 py-2 text-xs font-medium text-brand-ink"
-              >
-                <option value="ALL">All Zones (24 Clusters)</option>
-                {GEO_ZONES.map((z) => (
-                  <option key={z} value={z}>
-                    {z} (4)
-                  </option>
-                ))}
-              </select>
-              <select
                 value={effectiveSlug}
                 onChange={(e) => setSelectedSlug(e.target.value)}
+                aria-label="Select a specific cluster"
                 className="rounded-lg border border-brand-teal/40 bg-brand-white px-3 py-2 text-xs font-semibold text-brand-teal"
               >
                 {clusters.map((c) => (
@@ -311,25 +376,42 @@ export default function GicDashboard({
             </div>
           )}
 
-          {/* Horizontal touch-friendly cluster pills for mobile & tablet */}
-          <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-            {clusters.map((c) => {
-              const active = c.slug === effectiveSlug;
-              return (
-                <button
-                  key={c.slug}
-                  type="button"
-                  onClick={() => setSelectedSlug(c.slug)}
-                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
-                    active
-                      ? "bg-brand-teal text-brand-white shadow"
-                      : "bg-brand-grey-green text-brand-ink-soft hover:bg-brand-mint-pale"
-                  }`}
-                >
-                  {c.state_label}
-                </button>
-              );
-            })}
+          {/* Horizontal touch-friendly cluster pills for the zone(s) chosen
+              above — at most 4 when one zone is selected (fits on screen,
+              no scrolling needed), only scrollable at all when "All Zones"
+              shows all 24, and a visible hint says so rather than leaving
+              it to be discovered by accident. */}
+          <div className="relative mt-3">
+            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {clusters.map((c) => {
+                const active = c.slug === effectiveSlug;
+                return (
+                  <button
+                    key={c.slug}
+                    type="button"
+                    onClick={() => setSelectedSlug(c.slug)}
+                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
+                      active
+                        ? "bg-brand-teal text-brand-white shadow"
+                        : "bg-brand-grey-green text-brand-ink-soft hover:bg-brand-mint-pale"
+                    }`}
+                  >
+                    {c.state_label}
+                  </button>
+                );
+              })}
+            </div>
+            {clusters.length > 6 && (
+              <>
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-brand-mint-pale/90 to-transparent"
+                />
+                <p className="mt-1 text-[11px] text-brand-ink-soft">
+                  Scroll or swipe for more clusters, or pick a single zone above →
+                </p>
+              </>
+            )}
           </div>
         </section>
 

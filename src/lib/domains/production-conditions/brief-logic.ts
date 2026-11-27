@@ -51,6 +51,8 @@ const METRIC_LABEL: Record<ProductionMetric, string> = {
   production_quantity: "production",
   yield: "yield",
   area_harvested: "area harvested",
+  stocks: "stocks",
+  producing_animals_slaughtered: "producing animals/slaughtered",
 };
 
 /**

@@ -36,18 +36,41 @@ export const FAOSTAT_AREA_CODE_NIGERIA = 159;
 export const FAOSTAT_DOMAIN_CODE = "QCL";
 const EXPECTED_AREA_NAME = "nigeria";
 
-export type ProductionMetric = "production_quantity" | "yield" | "area_harvested";
+export type ProductionMetric =
+  | "production_quantity"
+  | "yield"
+  | "area_harvested"
+  | "stocks"
+  | "producing_animals_slaughtered";
 
 /**
  * Elements are matched by their human-readable name (case-insensitive
  * substring), not by a hardcoded numeric Element Code — FAOSTAT's element
  * codes, like its area codes, could not be independently confirmed from
  * this environment, and the name string is both stable and unambiguous.
+ *
+ * "stocks" and "producing animals/slaughtered" are livestock-only elements
+ * (FAOSTAT's QCL domain reports them against livestock-product items —
+ * "Meat of cattle..." and "Raw milk of cattle" in TRACKED_COMMODITIES —
+ * not against any crop item), added on the user's explicit request to
+ * surface Nigeria's cattle-meat/cow-milk herd size and slaughter/producing
+ * counts alongside the existing production/yield/area figures. The exact
+ * "Producing Animals/Slaughtered" label is FAOSTAT's own standard element
+ * name for this measure across all livestock-product items (meat, milk,
+ * eggs, wool alike) per its public documentation, but — same caveat as
+ * FAOSTAT_AREA_CODE_NIGERIA above — this could not be confirmed against a
+ * live API response or a real downloaded file from this sandbox. If a
+ * real FAOSTAT export's Element column uses different wording, this
+ * substring simply won't match (rows are silently skipped, never
+ * mis-filed) — check the real file's Element values against this list if
+ * stocks/slaughter figures don't appear after a re-upload.
  */
 const ELEMENT_METRIC_RULES: Array<{ match: string; metric: ProductionMetric }> = [
   { match: "production", metric: "production_quantity" },
   { match: "yield", metric: "yield" },
   { match: "area harvested", metric: "area_harvested" },
+  { match: "producing animals/slaughtered", metric: "producing_animals_slaughtered" },
+  { match: "stocks", metric: "stocks" },
 ];
 
 export function matchMetric(elementName: string): ProductionMetric | null {
@@ -86,6 +109,51 @@ export const TRACKED_COMMODITIES: TrackedCommodity[] = [
   { commodity: "Sesame seed", itemNameVariants: ["sesame seed"] },
   { commodity: "Cattle meat", itemNameVariants: ["meat of cattle with the bone, fresh or chilled"] },
   { commodity: "Cow milk", itemNameVariants: ["raw milk of cattle", "milk, whole fresh cow"] },
+  // Added 2026-11-26 at the user's request. Unlike every entry above, these
+  // four item-name variants are not a best guess from documentation — the
+  // user supplied a real FAOSTAT QCL export for Nigeria (dated 2026-11-26)
+  // containing these exact Item strings verbatim (item codes 01312, 01372,
+  // 01657, 01313 respectively), so they're confirmed, not unconfirmed like
+  // FAOSTAT_AREA_CODE_NIGERIA elsewhere in this file.
+  { commodity: "Bananas", itemNameVariants: ["bananas"] },
+  { commodity: "Cashew nuts", itemNameVariants: ["cashew nuts, in shell", "cashew nuts"] },
+  { commodity: "Ginger", itemNameVariants: ["ginger, raw", "ginger"] },
+  { commodity: "Plantains", itemNameVariants: ["plantains and cooking bananas", "plantains"] },
+  // Added 2026-11-27 at the user's request (a plain-language crop list, not
+  // a FAOSTAT export like the batch above). Each item name below was
+  // checked against FAOSTAT's own published item/code references via web
+  // research (FAO item codes cited alongside each entry) rather than
+  // guessed from memory — a middle confidence tier: better-sourced than
+  // the original 15 (pure documentation guesses, never independently
+  // checked), but not as certain as the four directly above (confirmed
+  // against a real, dated export the user supplied). Treat these as
+  // "best candidate from published FAOSTAT references, confirm on first
+  // live run" — same posture as FAOSTAT_AREA_CODE_NIGERIA above.
+  //
+  // Four items from the user's list are deliberately left out:
+  // - "Banana", "Plantain", and "Ginger" are already tracked above.
+  // - "Beans" is Nigeria's common name for cowpea (Vigna unguiculata),
+  //   already tracked above as "Cowpeas" (FAOSTAT item "Cow peas, dry") —
+  //   not a separate commodity.
+  // - "Fluted pumpkin leaves" (ugu, Telfairia occidentalis) has no
+  //   FAOSTAT item at all — FAO's own crop-use database states plainly
+  //   that no statistical production data exists for it globally. This
+  //   is a real gap in FAOSTAT's coverage, not a naming mismatch; tracking
+  //   it would need a different data source (e.g. an NBS survey), out of
+  //   scope for this FAOSTAT-only domain as currently built.
+  { commodity: "Cashewapple", itemNameVariants: ["cashewapple", "cashew apple"] }, // FAO code 0591 — the fruit, distinct from "Cashew nuts, in shell" (FAO code 0217) already tracked above
+  { commodity: "Shea nuts", itemNameVariants: ["karite nuts (sheanuts)", "shea nuts", "sheanuts"] }, // FAO code 0263, officially named "Karite nuts (sheanuts)"
+  { commodity: "Carrots and turnips", itemNameVariants: ["carrots and turnips", "carrots"] },
+  { commodity: "Cabbages", itemNameVariants: ["cabbages", "cabbages and other brassicas"] }, // FAO code 0358
+  { commodity: "Lettuce and chicory", itemNameVariants: ["lettuce and chicory", "lettuce"] },
+  { commodity: "Watermelons", itemNameVariants: ["watermelons"] },
+  { commodity: "Melonseed", itemNameVariants: ["melonseed", "melon seed"] }, // FAO code 0299 — Nigeria's "egusi"; FAOSTAT's own data shows Nigeria as the world's largest producer
+  { commodity: "Tomatoes", itemNameVariants: ["tomatoes"] },
+  { commodity: "Chillies and peppers, green", itemNameVariants: ["chillies and peppers, green", "chillies and peppers"] }, // FAO code 0401 — FAOSTAT has no separate "bell pepper" item; this combined item covers both chillies and sweet/bell peppers together
+  { commodity: "Sweet potatoes", itemNameVariants: ["sweet potatoes"] },
+  { commodity: "Potatoes", itemNameVariants: ["potatoes"] }, // Nigeria's "Irish potato" (vs. sweet potato) — FAOSTAT's plain item name is just "Potatoes"
+  { commodity: "Pineapples", itemNameVariants: ["pineapples"] }, // FAO code 0574
+  { commodity: "Oranges", itemNameVariants: ["oranges"] },
 ];
 
 export function matchCommodity(itemName: string): string | null {
@@ -185,7 +253,7 @@ export function parseFaostatRecords(raw: unknown, expectedAreaCode: number): Pro
     if (!commodity) continue; // not one of GIC's tracked commodities
 
     const metric = matchMetric(record.Element);
-    if (!metric) continue; // not production/yield/area-harvested (e.g. "Stocks")
+    if (!metric) continue; // not one of ELEMENT_METRIC_RULES's tracked elements (e.g. "Prices")
 
     rows.push({
       commodity,

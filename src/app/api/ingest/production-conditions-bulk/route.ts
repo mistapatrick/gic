@@ -3,7 +3,7 @@ import { getServerEnv } from "@/lib/env.server";
 import { isAuthorizedBearer } from "@/lib/auth/cron-auth";
 import {
   fetchProductionConditionsBulkChunk,
-  writeProductionConditionsBulkChunk,
+  writeProductionConditionsBulkChunkWithDiagnostics,
 } from "@/lib/domains/production-conditions/bulk-backfill";
 
 /**
@@ -54,8 +54,11 @@ export async function POST(req: NextRequest) {
   }
 
   let rowsWritten: number;
+  let skippedCommodities: { itemName: string; count: number }[];
   try {
-    rowsWritten = await writeProductionConditionsBulkChunk(rows);
+    const result = await writeProductionConditionsBulkChunkWithDiagnostics(rows);
+    rowsWritten = result.rowsWritten;
+    skippedCommodities = result.skippedCommodities;
   } catch (err) {
     console.error("[ingest/production-conditions-bulk] write failed:", err);
     return NextResponse.json(
@@ -64,8 +67,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // No human watches this route fire (it's a manual-trigger fallback — see
+  // this file's header comment), so skipped commodities have no UI to show
+  // up in. Logging them is what makes a future untracked-commodity gap
+  // discoverable later, via this route's own server logs, rather than
+  // silent the way the admin upload used to be before this same diagnostic
+  // was added there.
+  if (skippedCommodities.length > 0) {
+    console.warn(
+      "[ingest/production-conditions-bulk] skipped untracked commodities:",
+      skippedCommodities
+    );
+  }
+
   return NextResponse.json({
     status: "success",
     rows_written: rowsWritten,
+    skipped_commodities: skippedCommodities,
   });
 }

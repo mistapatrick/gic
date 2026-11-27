@@ -2,9 +2,51 @@ import { describe, expect, it } from "vitest";
 import {
   detectBulkCsvShape,
   parseBulkCsvRows,
+  parseBulkCsvRowsWithDiagnostics,
+  extractBulkDownloadUrl,
   type BulkCsvRow,
 } from "@/lib/domains/production-conditions/bulk-ingest-logic";
 import { FAOSTAT_AREA_CODE_NIGERIA } from "@/lib/domains/production-conditions/ingest-logic";
+
+describe("extractBulkDownloadUrl", () => {
+  it("extracts a single matching URL from a JSON-shaped catalog response", () => {
+    const response = JSON.stringify({
+      data: [
+        {
+          FileName: "Production_Crops_Livestock_E_All_Data_NOFLAG.zip",
+          URL: "https://bulks-faostat.fao.org/production/Production_Crops_Livestock_E_All_Data_NOFLAG.zip",
+          DateUpdate: "2026-02-25",
+        },
+      ],
+    });
+    expect(extractBulkDownloadUrl(response)).toBe(
+      "https://bulks-faostat.fao.org/production/Production_Crops_Livestock_E_All_Data_NOFLAG.zip"
+    );
+  });
+
+  it("prefers a NOFLAG url when multiple files are listed", () => {
+    const response = JSON.stringify({
+      data: [
+        { URL: "https://bulks-faostat.fao.org/production/Production_Crops_Livestock_E_All_Data.zip" },
+        { URL: "https://bulks-faostat.fao.org/production/Production_Crops_Livestock_E_All_Data_NOFLAG.zip" },
+      ],
+    });
+    expect(extractBulkDownloadUrl(response)).toContain("NOFLAG");
+  });
+
+  it("falls back to the first match when no NOFLAG url is present", () => {
+    const response = `{"url":"https://bulks-faostat.fao.org/production/Something_E_All_Data.zip"}`;
+    expect(extractBulkDownloadUrl(response)).toBe(
+      "https://bulks-faostat.fao.org/production/Something_E_All_Data.zip"
+    );
+  });
+
+  it("throws a specific error naming the response when no url is found", () => {
+    expect(() => extractBulkDownloadUrl('{"error":"not found"}')).toThrow(
+      /contained no recognizable/
+    );
+  });
+});
 
 describe("detectBulkCsvShape", () => {
   it("detects the wide layout from Y#### columns", () => {
@@ -78,10 +120,44 @@ describe("parseBulkCsvRows — wide layout", () => {
 
   it("skips untracked commodities and elements", () => {
     const rows = parseBulkCsvRows(
-      [wideRow({ Item: "Bananas" }), wideRow({ Element: "Stocks" })],
+      [wideRow({ Item: "Sugar cane" }), wideRow({ Element: "Prices" })],
       FAOSTAT_AREA_CODE_NIGERIA
     );
     expect(rows).toHaveLength(0);
+  });
+
+  it("reports which untracked item names were skipped, and how often, via the diagnostics entry point", () => {
+    // wideRow() defaults expand to 2 years (Y2022, Y2023), so one row with
+    // an untracked Item should count as 2 skipped cells, not 1.
+    const { rows, skippedCommodities } = parseBulkCsvRowsWithDiagnostics(
+      [wideRow({ Item: "Sugar cane" }), wideRow({ Item: "Sorghum" })],
+      FAOSTAT_AREA_CODE_NIGERIA
+    );
+    expect(rows).toHaveLength(2); // only the tracked Sorghum rows
+    expect(skippedCommodities).toEqual([{ itemName: "Sugar cane", count: 2 }]);
+  });
+
+  it("does not report a skip for a row dropped only for its untracked Element (commodity itself matched)", () => {
+    const { skippedCommodities } = parseBulkCsvRowsWithDiagnostics(
+      [wideRow({ Element: "Prices" })], // "Maize (corn)" is tracked; "Prices" is not
+      FAOSTAT_AREA_CODE_NIGERIA
+    );
+    expect(skippedCommodities).toEqual([]);
+  });
+
+  it("tracks the livestock-only Stocks and Producing Animals/Slaughtered elements", () => {
+    const rows = parseBulkCsvRows(
+      [
+        wideRow({ Item: "Meat of cattle with the bone, fresh or chilled", Element: "Stocks" }),
+        wideRow({
+          Item: "Meat of cattle with the bone, fresh or chilled",
+          Element: "Producing Animals/Slaughtered",
+        }),
+      ],
+      FAOSTAT_AREA_CODE_NIGERIA
+    );
+    const metrics = new Set(rows.map((r) => r.metric));
+    expect(metrics).toEqual(new Set(["stocks", "producing_animals_slaughtered"]));
   });
 
   it("skips blank/missing year values without error", () => {

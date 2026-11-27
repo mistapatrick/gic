@@ -189,28 +189,40 @@ function* iterateRawCells(rows: BulkCsvRow[], detected: DetectedBulkShape): Gene
 }
 
 /**
- * Parses an already-CSV-decoded array of rows (csv-parse's `columns: true`
- * output) into ProductionConditionRow[], filtered to `expectedAreaName`
- * (Nigeria) and GIC's tracked commodities/metrics — the bulk-file
- * equivalent of parseFaostatRecords in ingest-logic.ts, reusing that
- * file's matchCommodity/matchMetric unchanged since both operate on
- * Item/Element names, which don't differ between the two FAOSTAT exports.
- *
- * Unlike parseFaostatRecords (which can throw on an unexpected Area
- * because every row it receives was already filtered server-side by
- * `?area=159`), this parser receives EVERY country in one file — rows for
- * other countries are expected and silently skipped, not an error. The
- * loud "wrong area code" failure mode only applies when NO Nigeria rows
- * are found at all, which would mean the area-code filter below is wrong,
- * not that some other country's data leaked in.
+ * One distinct FAOSTAT Item name that appeared in Nigeria's rows but isn't
+ * on TRACKED_COMMODITIES (ingest-logic.ts), with how many (area, element,
+ * year) cells were silently dropped for it. Surfaced so a human uploading
+ * a file can actually see "these items didn't match anything" instead of
+ * the upload just reporting a row count with no context — see
+ * parseBulkCsvRowsWithDiagnostics below and
+ * src/app/api/admin/production-conditions/bulk-upload/route.ts, which is
+ * where this was first needed (ginger/plantain/banana/cashew uploads
+ * writing 0 rows with no indication why).
  */
-export function parseBulkCsvRows(rows: BulkCsvRow[], expectedAreaCode: number): ProductionConditionRow[] {
+export interface SkippedCommodityCount {
+  itemName: string;
+  count: number;
+}
+
+interface BulkParseResult {
+  rows: ProductionConditionRow[];
+  skippedCommodities: SkippedCommodityCount[];
+}
+
+/**
+ * Shared implementation for parseBulkCsvRows and
+ * parseBulkCsvRowsWithDiagnostics — exactly one place does the actual
+ * row-by-row filtering, so the two exported entry points can never drift
+ * apart on which rows count as "written" vs "skipped."
+ */
+function parseBulkCsvRowsInternal(rows: BulkCsvRow[], expectedAreaCode: number): BulkParseResult {
   if (rows.length === 0) {
     throw new Error("FAOSTAT bulk CSV had no data rows to parse.");
   }
 
   const detected = detectBulkCsvShape(rows[0]);
   const out: ProductionConditionRow[] = [];
+  const skippedCommodityCounts = new Map<string, number>();
   let sawNigeriaByCode = false;
   let sawNigeriaByName = false;
 
@@ -238,7 +250,11 @@ export function parseBulkCsvRows(rows: BulkCsvRow[], expectedAreaCode: number): 
     if (!Number.isFinite(cell.year)) continue;
 
     const commodity = matchCommodity(cell.itemName);
-    if (!commodity) continue;
+    if (!commodity) {
+      const key = cell.itemName.trim();
+      if (key) skippedCommodityCounts.set(key, (skippedCommodityCounts.get(key) ?? 0) + 1);
+      continue;
+    }
 
     const metric = matchMetric(cell.elementName);
     if (!metric) continue;
@@ -266,5 +282,45 @@ export function parseBulkCsvRows(rows: BulkCsvRow[], expectedAreaCode: number): 
     );
   }
 
-  return out;
+  const skippedCommodities = Array.from(skippedCommodityCounts, ([itemName, count]) => ({ itemName, count })).sort(
+    (a, b) => b.count - a.count
+  );
+
+  return { rows: out, skippedCommodities };
+}
+
+/**
+ * Parses an already-CSV-decoded array of rows (csv-parse's `columns: true`
+ * output) into ProductionConditionRow[], filtered to `expectedAreaName`
+ * (Nigeria) and GIC's tracked commodities/metrics — the bulk-file
+ * equivalent of parseFaostatRecords in ingest-logic.ts, reusing that
+ * file's matchCommodity/matchMetric unchanged since both operate on
+ * Item/Element names, which don't differ between the two FAOSTAT exports.
+ *
+ * Unlike parseFaostatRecords (which can throw on an unexpected Area
+ * because every row it receives was already filtered server-side by
+ * `?area=159`), this parser receives EVERY country in one file — rows for
+ * other countries are expected and silently skipped, not an error. The
+ * loud "wrong area code" failure mode only applies when NO Nigeria rows
+ * are found at all, which would mean the area-code filter below is wrong,
+ * not that some other country's data leaked in.
+ *
+ * Kept deliberately unchanged (same signature, same return shape, same
+ * behavior) so every existing caller and test is unaffected — anything
+ * that wants to know WHAT was skipped and why should call
+ * parseBulkCsvRowsWithDiagnostics instead.
+ */
+export function parseBulkCsvRows(rows: BulkCsvRow[], expectedAreaCode: number): ProductionConditionRow[] {
+  return parseBulkCsvRowsInternal(rows, expectedAreaCode).rows;
+}
+
+/**
+ * Same parsing as parseBulkCsvRows, but also returns which Item names were
+ * seen (for Nigeria, with a usable value) but didn't match
+ * TRACKED_COMMODITIES, with a count each — the data a human needs to
+ * understand "why did my upload write 0 rows for these commodities"
+ * instead of a bare row count with no explanation.
+ */
+export function parseBulkCsvRowsWithDiagnostics(rows: BulkCsvRow[], expectedAreaCode: number): BulkParseResult {
+  return parseBulkCsvRowsInternal(rows, expectedAreaCode);
 }

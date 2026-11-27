@@ -8,8 +8,10 @@ import {
 } from "@/lib/domains/production-conditions/ingest-logic";
 import {
   parseBulkCsvRows,
+  parseBulkCsvRowsWithDiagnostics,
   extractBulkDownloadUrl,
   type BulkCsvRow,
+  type SkippedCommodityCount,
 } from "@/lib/domains/production-conditions/bulk-ingest-logic";
 import { upsertProductionConditionRows } from "@/lib/domains/production-conditions/backfill";
 import { GIC_OUTBOUND_HEADERS } from "@/lib/ingestion/outbound-headers";
@@ -165,4 +167,26 @@ export function parseProductionConditionsBulkChunk(rows: BulkCsvRow[]): Producti
 export async function writeProductionConditionsBulkChunk(rows: BulkCsvRow[]): Promise<number> {
   const parsed = parseProductionConditionsBulkChunk(rows);
   return upsertProductionConditionRows(parsed);
+}
+
+/**
+ * Same parse as parseProductionConditionsBulkChunk, but also reports which
+ * Item names in the file didn't match TRACKED_COMMODITIES and how often —
+ * see parseBulkCsvRowsWithDiagnostics in bulk-ingest-logic.ts for why this
+ * exists. Callers that have a human watching (the admin upload route) or a
+ * log worth checking later (the scheduled/manual-fallback cron route, the
+ * GitHub Actions script) should prefer this over the silent version above.
+ */
+export function parseProductionConditionsBulkChunkWithDiagnostics(
+  rows: BulkCsvRow[]
+): { rows: ProductionConditionRow[]; skippedCommodities: SkippedCommodityCount[] } {
+  return parseBulkCsvRowsWithDiagnostics(rows, FAOSTAT_AREA_CODE_NIGERIA);
+}
+
+export async function writeProductionConditionsBulkChunkWithDiagnostics(
+  rows: BulkCsvRow[]
+): Promise<{ rowsWritten: number; skippedCommodities: SkippedCommodityCount[] }> {
+  const { rows: parsed, skippedCommodities } = parseProductionConditionsBulkChunkWithDiagnostics(rows);
+  const rowsWritten = await upsertProductionConditionRows(parsed);
+  return { rowsWritten, skippedCommodities };
 }

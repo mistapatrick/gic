@@ -48,7 +48,7 @@ loadEnv({ path: ".env.local" }); // no-op in CI (no .env.local there) — for lo
 import { createClient } from "@supabase/supabase-js";
 import {
   fetchProductionConditionsBulkChunk,
-  parseProductionConditionsBulkChunk,
+  parseProductionConditionsBulkChunkWithDiagnostics,
 } from "../src/lib/domains/production-conditions/bulk-backfill";
 
 async function main() {
@@ -67,8 +67,21 @@ async function main() {
   const csvRows = await fetchProductionConditionsBulkChunk();
   console.log(`Downloaded and parsed ${csvRows.length} raw CSV rows.`);
 
-  const rows = parseProductionConditionsBulkChunk(csvRows);
+  const { rows, skippedCommodities } = parseProductionConditionsBulkChunkWithDiagnostics(csvRows);
   console.log(`${rows.length} rows matched Nigeria after filtering.`);
+
+  // Visible in the GitHub Actions run log — the only place anyone would
+  // see this for a scheduled run, since there's no admin UI watching this
+  // script fire. Same diagnostic that fixed the admin upload panel's
+  // silent-drop problem, applied here so a future untracked-commodity gap
+  // shows up in a run log instead of needing to be re-diagnosed from
+  // scratch.
+  if (skippedCommodities.length > 0) {
+    console.log("Skipped item names not on TRACKED_COMMODITIES (no rows written for these):");
+    for (const { itemName, count } of skippedCommodities) {
+      console.log(`  - "${itemName}": ${count} cell${count === 1 ? "" : "s"}`);
+    }
+  }
 
   if (rows.length === 0) {
     console.log("Nothing to write — exiting without touching production_conditions.");

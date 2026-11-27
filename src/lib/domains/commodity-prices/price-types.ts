@@ -16,10 +16,16 @@ import type {
 export type PriceType = "retail" | "wholesale" | "exchange_spot" | "farmgate";
 
 /**
- * Reuse production_conditions' own 15-commodity list rather than a second
- * copy — the user explicitly asked for commodity pricing to cover the same
- * 15 commodities tracked there, and keeping one source of truth means a
- * future change to that list doesn't need to be mirrored by hand here.
+ * Reuse production_conditions' own TRACKED_COMMODITIES list rather than a
+ * second copy — the user explicitly asked for commodity pricing to cover
+ * the same commodities tracked there (originally 15, grown since by two
+ * further rounds of additions), and keeping one source of truth means a
+ * future change to that list doesn't need to be mirrored by hand here. Not
+ * yet consumed anywhere else in this codebase — NBS/World Bank RTFP each
+ * match against their own small, separately-researched item-name list
+ * (see nbs-ingest-logic.ts/worldbank-rtfp-ingest-logic.ts), and the manual
+ * commodity_prices entry form accepts any free-form commodity string
+ * rather than constraining to this list.
  */
 export const TRACKED_PRICE_COMMODITIES: string[] = PRODUCTION_TRACKED_COMMODITIES.map(
   (c) => c.commodity
