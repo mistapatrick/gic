@@ -11,6 +11,7 @@ import {
   buildOpenMeteoUrl,
   getCutoffHour,
   getLagosDateParts,
+  getPreviousLagosDate,
   OpenMeteoResponseSchema,
   parseIngestionResults,
   type ClusterRow,
@@ -87,6 +88,65 @@ export async function POST(req: NextRequest) {
   if (!omParsed.success) {
     console.error("[ingest] Open-Meteo response failed validation:", omParsed.error.message);
     return NextResponse.json({ error: "Open-Meteo response shape unexpected" }, { status: 502 });
+  }
+
+  // 3b. Self-heal a missed previous day. This is the actual fix for the
+  //     2026-11-22→27 weather staleness gap: a late-firing run (GitHub
+  //     Actions' own scheduler can be delayed well past this route's 14-minute
+  //     margin — confirmed from a live run that fired ~52 minutes late,
+  //     already across the WAT midnight boundary) used to silently discard
+  //     the previous day's hours entirely, because step 4 below only ever
+  //     kept rows matching the single `obsDate` it was called with. The prior
+  //     day was then gone for good — nothing else re-requested it, and
+  //     MIN_COMPLETE_CUTOFF_HOUR only controls which existing row the
+  //     dashboard shows, not whether one gets written in the first place.
+  //     The already-fetched Open-Meteo response (past_days=1) still has that
+  //     full prior day in it, so: check whether yesterday's own report is
+  //     already complete, and if not, extract and upsert it from this same
+  //     response before doing anything else. Best-effort and non-fatal — any
+  //     failure here is logged and the route proceeds to its normal obsDate
+  //     handling below exactly as before.
+  const previousDate = getPreviousLagosDate(obsDate);
+  try {
+    const { data: prevReport } = await supabaseAdmin
+      .from("daily_observed_reports")
+      .select("cutoff_hour_wat")
+      .eq("obs_date", previousDate)
+      .maybeSingle();
+
+    // 23, not MIN_COMPLETE_CUTOFF_HOUR (20): this checks "did we capture the
+    // whole day," a stricter, write-side question than "is it good enough to
+    // display," which is all the display threshold means.
+    if (!prevReport || prevReport.cutoff_hour_wat < 23) {
+      const backfill = parseIngestionResults(omParsed.data, clusters as ClusterRow[], previousDate, 23);
+      if (backfill.hourlyRows.length > 0) {
+        const { error: backfillHourlyErr } = await supabaseAdmin
+          .from("observed_hourly")
+          .upsert(backfill.hourlyRows, { onConflict: "cluster_id,obs_date,obs_hour" });
+        if (backfillHourlyErr) {
+          console.error("[ingest] previous-day self-heal hourly upsert failed:", backfillHourlyErr);
+        } else {
+          const { error: backfillReportErr } = await supabaseAdmin.from("daily_observed_reports").upsert(
+            {
+              obs_date: previousDate,
+              cutoff_hour_wat: 23,
+              national_summary:
+                "This report was reconstructed automatically by the following night's ingestion run, after the scheduled run for this date did not complete in time. No AI synthesis was generated for this catch-up write.",
+              regional_insights: [],
+              cluster_metrics: backfill.clusterMetrics,
+            },
+            { onConflict: "obs_date" }
+          );
+          if (backfillReportErr) {
+            console.error("[ingest] previous-day self-heal report upsert failed:", backfillReportErr);
+          } else {
+            console.log(`[ingest] self-healed previous day ${previousDate} (was missing or incomplete).`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[ingest] previous-day self-heal check failed:", err);
   }
 
   // 4. Filter strictly to obsDate hours 00:00..cutoffHour (experienced/observed only).

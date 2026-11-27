@@ -8,10 +8,25 @@
  * grant scope over a domain that doesn't exist yet fails loudly instead of
  * silently creating an account with a useless or dangling scope.
  *
- * "weather" and "production_conditions" are deliberately absent: both are
- * machine-ingested only (src/lib/domains/weather/,
- * src/lib/domains/production-conditions/) — nobody is ever manually scoped
- * to either.
+ * "weather" is deliberately absent: it stays machine-ingested only
+ * (src/lib/domains/weather/) — nobody is ever manually scoped to it.
+ *
+ * "production_conditions" USED to be absent for the same reason, with a
+ * comment here that read almost identically to this one. That changed
+ * 2026-11-27: with the user's own automated-ingestion experience across
+ * FAOSTAT/NBS/World Bank RTFP/FEWS NET showing how much friction
+ * auto-ingest carries in practice (Vercel timeouts, HTML walls instead of
+ * the expected file format, unverifiable area/item codes, a transient HDX
+ * block — see the Live-deployment-fixes section of the build-plan doc), the
+ * user asked for a manual-entry path for production output too, alongside
+ * the three commodity-price sources (see
+ * src/lib/domains/production-conditions/entry-schema.ts). The explicit
+ * decision made at the same time was to keep every existing automated cron
+ * running unchanged — manual entry is a backstop and correction path, not a
+ * replacement — so both write into their own history (production_conditions
+ * for automated rows, manual_data_entries for manual ones) and
+ * ProductionConditionsCard reconciles them at read time, the same pattern
+ * commodity_prices already used for AFEX.
  *
  * Keep this in sync with the keys seeded into feature_flags in
  * supabase/migrations/0002_auth_roles_audit.sql and
@@ -29,6 +44,7 @@ export const DATA_ENTRY_DOMAINS = [
   "crop_pest_tracking",
   "livestock_outbreak_tracking",
   "commodity_prices",
+  "production_conditions",
 ] as const;
 
 export type DataEntryDomain = (typeof DATA_ENTRY_DOMAINS)[number];

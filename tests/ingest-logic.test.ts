@@ -6,6 +6,7 @@ import {
   computeRiskFlags,
   getCutoffHour,
   getLagosDateParts,
+  getPreviousLagosDate,
   OpenMeteoResponseSchema,
   parseIngestionResults,
   type ClusterRow,
@@ -88,6 +89,24 @@ describe("getLagosDateParts / getCutoffHour", () => {
 
   it("passes through hours within the valid 0-23 range unchanged (manual daytime backfill runs)", () => {
     expect(getCutoffHour(9)).toBe(9);
+  });
+});
+
+describe("getPreviousLagosDate (the self-heal backfill's date math)", () => {
+  it("returns the previous day within an ordinary month", () => {
+    expect(getPreviousLagosDate("2026-11-27")).toBe("2026-11-26");
+  });
+
+  it("rolls back across a month boundary", () => {
+    expect(getPreviousLagosDate("2026-12-01")).toBe("2026-11-30");
+  });
+
+  it("rolls back across a year boundary", () => {
+    expect(getPreviousLagosDate("2027-01-01")).toBe("2026-12-31");
+  });
+
+  it("handles the day after a leap day correctly", () => {
+    expect(getPreviousLagosDate("2028-03-01")).toBe("2028-02-29"); // 2028 is a leap year
   });
 });
 

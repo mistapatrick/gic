@@ -12,6 +12,13 @@ const ReviewSchema = z.object({ action: z.enum(["publish", "reject"]) });
  * update policy (migration 0004) is what actually authorizes this write,
  * so a bug in this route's own role check would still be caught by
  * Postgres rather than silently succeeding via a privileged client.
+ *
+ * As of 2026-11-27, a super_admin's OWN submission normally never reaches
+ * this route pending — POST /api/manual-entries self-publishes it inline
+ * (see that route's comment). This route stays the path for reviewing a
+ * data_entry account's submission, and the fallback for the rare case
+ * where a super_admin's self-publish step itself failed (the entry is left
+ * pending rather than lost, visible here like any other pending entry).
  */
 export async function PATCH(
   request: NextRequest,

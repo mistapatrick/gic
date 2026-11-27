@@ -25,6 +25,23 @@ interface ProductionRow {
   year: number;
 }
 
+interface PublishedManualEntry {
+  payload: {
+    commodity: string;
+    metric: ProductionMetric;
+    value: number;
+    unit: string;
+    year: number;
+    region: string;
+  };
+}
+
+// Generous enough to cover every published manual correction/backstop
+// entry without needing a "latest per group" database view — the merge
+// logic below narrows this down the same way the automated rows already
+// are (latest year per commodity+metric wins).
+const RECENT_MANUAL_ENTRIES_LIMIT = 200;
+
 interface ProductionBrief {
   national_summary: string;
   standout_insights: string[];
@@ -77,6 +94,17 @@ const SECONDARY_METRICS: Array<{ metric: ProductionMetric; label: string }> = [
  * their own deployed environment (see migration 0004's comment on why
  * that default is deliberately cautious) — this card existing in the
  * bundle is not the same as it being visible.
+ *
+ * As of 2026-11-27, this also merges in any published manual_data_entries
+ * row for this domain (see src/components/ProductionConditionEntryForm.tsx)
+ * — a manual backstop/correction path added after the automated FAOSTAT
+ * ingestion showed real friction in production (Vercel timeouts, unparsed
+ * HTML responses, unverifiable area/item codes). Both sources feed the
+ * exact same "latest year per commodity+metric" logic below, same pattern
+ * CommodityPricesCard already used for AFEX's manual entries — whichever
+ * source has the more recent year for a given commodity+metric wins the
+ * displayed figure, while both tables keep every row they've ever written
+ * for historical/analytical querying.
  */
 export function ProductionConditionsCard() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
@@ -95,25 +123,49 @@ export function ProductionConditionsCard() {
 
       try {
         const supabase = getSupabaseBrowserClient();
-        const { data, error: fetchError } = await supabase
-          .from("production_conditions")
-          .select("commodity, metric, value, unit, year")
-          .in("metric", [
-            "production_quantity",
-            "yield",
-            "area_harvested",
-            "stocks",
-            "producing_animals_slaughtered",
-          ])
-          .eq("region", "National")
-          .order("year", { ascending: false });
+        const [automatedRes, manualRes] = await Promise.all([
+          supabase
+            .from("production_conditions")
+            .select("commodity, metric, value, unit, year")
+            .in("metric", [
+              "production_quantity",
+              "yield",
+              "area_harvested",
+              "stocks",
+              "producing_animals_slaughtered",
+            ])
+            .eq("region", "National")
+            .order("year", { ascending: false }),
+          supabase
+            .from("manual_data_entries")
+            .select("payload")
+            .eq("domain", "production_conditions")
+            .eq("status", "published")
+            .limit(RECENT_MANUAL_ENTRIES_LIMIT),
+        ]);
 
         if (cancelled) return;
-        if (fetchError) {
+        if (automatedRes.error || manualRes.error) {
           setError("Could not load production conditions data.");
           return;
         }
-        setRows((data as ProductionRow[]) ?? []);
+
+        const automated = (automatedRes.data as ProductionRow[]) ?? [];
+        const manual: ProductionRow[] = ((manualRes.data as PublishedManualEntry[]) ?? [])
+          .filter((entry) => entry.payload.region === "National")
+          .map((entry) => ({
+            commodity: entry.payload.commodity,
+            metric: entry.payload.metric,
+            value: entry.payload.value,
+            unit: entry.payload.unit,
+            year: entry.payload.year,
+          }));
+
+        // Re-sort the merged set by year descending so the "latest per
+        // commodity+metric" dedup below (which just keeps the first row it
+        // sees per key) picks whichever source — automated or manual — has
+        // the more recent year, not whichever array happened to come first.
+        setRows([...automated, ...manual].sort((a, b) => b.year - a.year));
       } catch {
         if (!cancelled) setError("Could not load production conditions data.");
       }
@@ -186,7 +238,8 @@ export function ProductionConditionsCard() {
         <h2 className="text-base font-semibold text-brand-teal-dark">Production conditions</h2>
       </div>
       <p className="mt-1 text-sm text-brand-muted">
-        Most recent annual production per tracked commodity, nationally (source: FAOSTAT).
+        Most recent annual production per tracked commodity, nationally (source: FAOSTAT,
+        plus any manually entered figures once published).
       </p>
 
       {error && <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}

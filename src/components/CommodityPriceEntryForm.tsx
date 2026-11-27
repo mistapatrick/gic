@@ -19,12 +19,16 @@ const STATUS_STYLE: Record<ManualEntry["status"], string> = {
 };
 
 /**
- * Submission form for the commodity_prices manual-entry domain — shown on
- * /dashboard only to a data_entry account whose domain_scope includes
- * "commodity_prices" (see src/app/dashboard/page.tsx). Every submission
- * lands as 'pending' and is only visible elsewhere once a super_admin
- * publishes it via ManualEntryReviewPanel — this form just shows the
- * signed-in staffer their own submission history and its review status.
+ * Submission form for the commodity_prices manual-entry domain (any of
+ * AFEX, NBS, World Bank RTFP, or an ad hoc "OTHER" source — see
+ * COMMODITY_PRICE_SOURCES) — shown on /dashboard to any account whose
+ * domain_scope includes "commodity_prices" (see src/app/dashboard/page.tsx).
+ * A data_entry account's submission lands 'pending' and is only visible
+ * elsewhere once a super_admin publishes it via the /admin review queue; a
+ * super_admin's own submission self-publishes immediately instead (see
+ * /api/manual-entries' POST handler, fixed 2026-11-27) — the success
+ * message below reflects whichever actually happened via the response's
+ * own entry.status, rather than assuming one outcome.
  */
 export function CommodityPriceEntryForm() {
   const [commodity, setCommodity] = useState("");
@@ -102,7 +106,11 @@ export function CommodityPriceEntryForm() {
         setError(body.error ?? "Failed to submit entry");
         return;
       }
-      setSuccessMessage("Entry submitted — awaiting super-admin review before it's published.");
+      setSuccessMessage(
+        body.entry?.status === "published"
+          ? "Entered and published immediately."
+          : "Entry submitted — awaiting super-admin review before it's published."
+      );
       setCommodity("");
       setPrice("");
       setUnit("");

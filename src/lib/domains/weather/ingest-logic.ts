@@ -39,6 +39,35 @@ export function getLagosDateParts(nowUtc: Date = new Date()): {
 }
 
 /**
+ * The calendar date immediately before `obsDate` (a "YYYY-MM-DD" string),
+ * correctly rolling over month and year boundaries (including leap years) —
+ * plain UTC date arithmetic, so it needs no timezone reasoning of its own.
+ *
+ * Exists for the nightly route's self-heal backfill (see route.ts): the real
+ * bug behind the 2026-11-22→27 weather staleness gap was not just "which row
+ * the dashboard shows" (MIN_COMPLETE_CUTOFF_HOUR above already handles that)
+ * but that `parseIngestionResults` only ever keeps hours matching the single
+ * `obsDate` it's called with — so when a run fires late enough to cross the
+ * WAT midnight boundary, the previous day's hours are silently discarded even
+ * though Open-Meteo's `past_days=1` response already contains all 24 of them.
+ * That day was then gone for good: nothing else re-requests it. The route
+ * now also calls `parseIngestionResults` a second time with
+ * `getPreviousLagosDate(obsDate)` and cutoff 23, from the SAME already-fetched
+ * response, and upserts that day too whenever it isn't already complete —
+ * recovering the one case this file's own `past_days=1` comment always
+ * claimed to cover but the code never actually implemented.
+ */
+export function getPreviousLagosDate(obsDate: string): string {
+  const [y, m, d] = obsDate.split("-").map(Number);
+  const prev = new Date(Date.UTC(y, m - 1, d));
+  prev.setUTCDate(prev.getUTCDate() - 1);
+  const yyyy = prev.getUTCFullYear();
+  const mm = String(prev.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(prev.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
  * Never ingest an hour that hasn't elapsed yet. Caps at 23:00 WAT (hour 23) —
  * the full day — now that the nightly run fires at 23:59 WAT. The clamp is
  * still worth keeping (rather than trusting the caller) because a manual

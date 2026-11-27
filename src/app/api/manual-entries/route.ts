@@ -5,9 +5,9 @@ import { writeAuditLog } from "@/lib/auth/audit";
 
 /**
  * Generic manual-entry submission + listing surface, shared by every
- * manual-entry domain (commodity_prices today; input_pricing,
- * crop_pest_tracking later) — see migration
- * 0004_production_conditions_and_manual_entries.sql and
+ * manual-entry domain (commodity_prices and, as of 2026-11-27,
+ * production_conditions too; input_pricing, crop_pest_tracking later) —
+ * see migration 0004_production_conditions_and_manual_entries.sql and
  * src/lib/domains/manual-entries/.
  *
  * src/proxy.ts already requires any caller here to be authenticated with
@@ -22,18 +22,24 @@ import { writeAuditLog } from "@/lib/auth/audit";
  * for exactly these two operations (insert-as-self-pending,
  * read-own-or-all), so Postgres is the actual enforcer here, not just this
  * route's own role check.
+ *
+ * Fixed 2026-11-27: this handler used to reject any caller whose role
+ * wasn't literally "data_entry" — a bug introduced the moment
+ * getCurrentUserRole() started synthesizing a super_admin's domainScope as
+ * every DATA_ENTRY_DOMAINS value (2026-11-25's UI/UX overhaul). That change
+ * made /dashboard render CommodityPriceEntryForm for a super_admin, but
+ * this route would still 403 the submission with "Only data-entry accounts
+ * submit manual entries" — never actually exercised until the user asked
+ * for a super-admin manual-entry path and it turned out submission itself
+ * was already silently broken. Fixed below by accepting both roles and
+ * relying on the same domainScope/has_domain_scope() check that already
+ * protected a data_entry account's own domain boundary.
  */
 
 export async function POST(request: NextRequest) {
   const role = await getCurrentUserRole();
   if (!role) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-  if (role.role !== "data_entry") {
-    return NextResponse.json(
-      { error: "Only data-entry accounts submit manual entries" },
-      { status: 403 }
-    );
   }
 
   let body: unknown;
@@ -107,6 +113,50 @@ export async function POST(request: NextRequest) {
     outcome: "success",
     changedFields: { domain, entryDate },
   });
+
+  // Self-publish: a super_admin's own submission goes live immediately
+  // rather than sitting pending for a review that would just be the same
+  // person approving their own entry a second time. This reuses the exact
+  // update the PATCH review route performs ([id]/route.ts) — same RLS
+  // policy ("Super admins review manual entries"), same columns set — just
+  // triggered inline instead of requiring a separate click. A data_entry
+  // account's submission is untouched by this and still lands pending,
+  // awaiting a super_admin's review as before.
+  if (role.role === "super_admin") {
+    const { data: published, error: publishError } = await supabase
+      .from("manual_data_entries")
+      .update({ status: "published", reviewed_by: role.userId, reviewed_at: new Date().toISOString() })
+      .eq("id", data.id)
+      .eq("status", "pending")
+      .select("id, domain, entry_date, status, created_at")
+      .maybeSingle();
+
+    if (publishError || !published) {
+      // Not lost — the entry is still saved as pending, same as any
+      // data_entry submission, just needing a manual publish from /admin
+      // (or a retry) instead of the usual instant self-publish.
+      await writeAuditLog({
+        actorId: role.userId,
+        action: "review_manual_entry",
+        targetTable: "manual_data_entries",
+        targetId: String(data.id),
+        outcome: "failure",
+        changedFields: { error: publishError?.message ?? "No row updated", status: "published" },
+      });
+      return NextResponse.json({ entry: data }, { status: 201 });
+    }
+
+    await writeAuditLog({
+      actorId: role.userId,
+      action: "review_manual_entry",
+      targetTable: "manual_data_entries",
+      targetId: String(data.id),
+      outcome: "success",
+      changedFields: { status: "published", selfPublished: true },
+    });
+
+    return NextResponse.json({ entry: published }, { status: 201 });
+  }
 
   return NextResponse.json({ entry: data }, { status: 201 });
 }

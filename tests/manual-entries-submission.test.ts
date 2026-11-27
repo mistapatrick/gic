@@ -87,3 +87,67 @@ describe("validateManualEntrySubmission", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+const VALID_PRODUCTION_CONDITION_PAYLOAD = {
+  commodity: "Maize",
+  metric: "production_quantity",
+  value: 12_500_000,
+  unit: "tonnes",
+  year: 2025,
+  region: "National",
+};
+
+describe("validateManualEntrySubmission — production_conditions (added 2026-11-27)", () => {
+  it("accepts a valid production_conditions submission", () => {
+    const result = validateManualEntrySubmission({
+      domain: "production_conditions",
+      entryDate: "2026-11-27",
+      payload: VALID_PRODUCTION_CONDITION_PAYLOAD,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data?.payload.metric).toBe("production_quantity");
+  });
+
+  it("applies the payload schema's own default (region)", () => {
+    const result = validateManualEntrySubmission({
+      domain: "production_conditions",
+      entryDate: "2026-11-27",
+      payload: {
+        commodity: "Rice (paddy)",
+        metric: "yield",
+        value: 2.3,
+        unit: "tonnes/ha",
+        year: 2025,
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.data?.payload.region).toBe("National");
+  });
+
+  it("rejects an unknown metric value", () => {
+    const result = validateManualEntrySubmission({
+      domain: "production_conditions",
+      entryDate: "2026-11-27",
+      payload: { ...VALID_PRODUCTION_CONDITION_PAYLOAD, metric: "made_up_metric" },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a year outside the production_conditions check constraint's range", () => {
+    const result = validateManualEntrySubmission({
+      domain: "production_conditions",
+      entryDate: "2026-11-27",
+      payload: { ...VALID_PRODUCTION_CONDITION_PAYLOAD, year: 1800 },
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a negative value", () => {
+    const result = validateManualEntrySubmission({
+      domain: "production_conditions",
+      entryDate: "2026-11-27",
+      payload: { ...VALID_PRODUCTION_CONDITION_PAYLOAD, value: -10 },
+    });
+    expect(result.ok).toBe(false);
+  });
+});
