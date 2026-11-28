@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerEnv } from "@/lib/env.server";
 import { isAuthorizedBearer } from "@/lib/auth/cron-auth";
 import {
-  fetchFoodSecurityBackfillChunk,
+  fetchFoodSecurityIncrementalChunk,
   writeFoodSecurityBackfillChunk,
 } from "@/lib/domains/food-security/backfill";
 
@@ -11,7 +11,18 @@ import {
  * new domain, independent of every other ingest route. See
  * food-security/backfill.ts for the app-identifier auth flow and
  * pagination.
+ *
+ * Uses the incremental fetch with a lookback window, not the full-history
+ * backfill function (that one is reserved for the one-time admin backfill —
+ * see domain-adapters.ts). Confirmed in production on 2026-11-28: calling
+ * the full-history function every week re-paginates through the entire HDX
+ * dataset (40+ sequential requests) and trips HDX's own rate limiting
+ * (HTTP 429) partway through. LOOKBACK_DAYS matches the convention already
+ * used by the NBS commodity-prices route — idempotent upsert makes
+ * re-checking a short window on every run harmless.
  */
+const LOOKBACK_DAYS = 90;
+
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -30,7 +41,9 @@ export async function POST(req: NextRequest) {
 
   let records: Array<Record<string, unknown>>;
   try {
-    records = await fetchFoodSecurityBackfillChunk();
+    const lookbackStart = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+    const startDate = lookbackStart.toISOString().slice(0, 10);
+    records = await fetchFoodSecurityIncrementalChunk(startDate);
   } catch (err) {
     console.error("[ingest/food-security] fetch failed:", err);
     return NextResponse.json(

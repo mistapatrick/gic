@@ -678,22 +678,55 @@ cap; `tests/paginate.test.ts` covers the page-boundary logic directly. If an
 export still looks truncated, check first whether the underlying data simply
 doesn't exist yet for the missing dates.
 
-**`/api/ingest/commodity-prices-nbs` or `/api/ingest/commodity-prices-worldbank-rtfp`
-returns 502 with an error mentioning "HTML" or "login/terms wall" instead
-of the expected file format** — Both ingestors deliberately throw instead
-of silently parsing garbage when the response isn't the ZIP (NBS) or CSV
-(World Bank RTFP) they expect, because neither source's exact live
-response shape could be confirmed from this build environment (its own
-outbound network allowlist blocks `nigerianstat.gov.ng` and
-`worldbank.org` directly — see `SECURITY.md` §18/§19). This means the
-real-world catalog page is gating the download behind a login, a terms
-click-through, or a changed URL structure that the regex-based link
-finders in `nbs-ingest-logic.ts` / `worldbank-rtfp-ingest-logic.ts` no
-longer match. Open the catalog URL in a browser
-(`https://microdata.nigerianstat.gov.ng/index.php/catalog/162` or
-`https://microdata.worldbank.org/index.php/catalog/4503`) from a real
-network, see what's actually gating it, and adjust the matching
-function accordingly.
+**`/api/ingest/commodity-prices-nbs` returns "success" with
+`rows_written: 0` every week** — Not a bug by itself. NBS republishes its
+catalog irregularly; confirmed live on 2026-11-28 that NBS's latest
+published entry was from May 2026. Zero rows is the correct result when
+no new period exists upstream yet — check the catalog directly
+(`https://microdata.nigerianstat.gov.ng/index.php/catalog/162`) to see
+whether a newer entry has since appeared.
+
+**`/api/ingest/commodity-prices-worldbank-rtfp` returns 502 with an error
+mentioning "HTML" instead of the expected CSV** — Confirmed structural,
+not transient, as of 2026-11-28: the catalog's download link
+(`https://microdata.worldbank.org/catalog/4503/data-dictionary`) no
+longer resolves to a raw CSV at all — it leads to a "Get Microdata"
+request-access/terms page, not a file. The ingestor deliberately refuses
+to parse that page as data rather than silently failing (see
+`SECURITY.md` §19/§23). This is the exact failure mode
+`worldbank-rtfp-backfill.ts`'s own header comment already anticipated;
+the recommended path is converting this one source to manual-entry, the
+same as AFEX, rather than continuing to chase World Bank's catalog
+structure. This needs a decision on scope, not another automated-path
+patch — see the "Roadmap" section or raise it for a decision before
+changing this ingestor again.
+
+**`/api/ingest/production-conditions` or the bulk-download path return
+502 mentioning FAOSTAT (`HTTP 521`, or "FAOSTAT fetch failed")** — FAOSTAT
+(`fenixservices.fao.org`) has outages; confirmed live on 2026-11-28 that
+the service itself was unreachable at the time of a failing run, not a
+defect here. Idempotent upserts make it safe to simply wait for the next
+scheduled run or re-trigger manually once FAOSTAT recovers.
+
+**`/api/ingest/food-security` returned `HTTP 429` ("too many requests")
+from HDX HAPI** — Fixed 2026-11-28. The weekly route was reusing the same
+full-history, up-to-50-page fetch function as the one-time admin
+backfill, re-paginating through HDX's entire history every week until
+HDX's own rate limiting rejected it partway through. It now calls a
+separate incremental fetch with a 90-day lookback window (see
+`fetchFoodSecurityIncrementalChunk` in
+`src/lib/domains/food-security/backfill.ts` and `SECURITY.md` §23). If
+this recurs, HDX's rate limit itself may have tightened further — check
+the actual response headers before widening the lookback window.
+
+**The production-conditions-bulk direct GitHub Actions runner
+(`npm run backfill:production-conditions-bulk`) fails with "the operation
+was aborted due to timeout"** — Fixed 2026-11-28. That script had no
+Vercel-style time ceiling of its own but was silently inheriting the
+45-second download timeout tuned for the Vercel-bound route; it now
+passes a 10-minute timeout (see `SECURITY.md` §23). If this recurs even
+with the longer timeout, that's real evidence FAOSTAT's bulk file itself
+is taking unusually long to serve, not a timeout-value problem.
 
 **A historical-backfill job's status is stuck on "running" and progress
 seems to have stopped** — "running" (not "completed" or "failed") just

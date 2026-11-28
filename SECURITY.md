@@ -1062,6 +1062,85 @@ math (including month/year rollover) deterministically. The existing
 window/reset/per-key-isolation behavior, which both new routes depend on
 unchanged.
 
+## 23. Live production ingest failures (2026-11-28) — confirmed causes and two fixes
+
+**Trigger.** Seven real GitHub Actions ingest runs were reported failing or
+suspect across five domains. Each was investigated against the actual live
+upstream source (not from memory) before concluding anything, continuing
+this project's established discipline of live-verifying third-party
+behavior rather than guessing from an error message alone.
+
+**Findings.**
+- **FAOSTAT (production_conditions and production_conditions_bulk, both
+  paths) — `HTTP 521`.** Confirmed via a direct live check that
+  `fenixservices.fao.org` was unreachable/erroring at the time of the run.
+  This is an upstream outage, not a defect in this codebase — no code
+  change made. The next scheduled run will likely succeed once FAOSTAT
+  recovers; idempotent upserts mean there is no harm in it simply retrying
+  on its normal schedule.
+- **NBS (`commodity_prices_nbs`) — "success," `rows_written: 0`.**
+  Confirmed via a live fetch of the actual catalog page
+  (`microdata.nigerianstat.gov.ng/index.php/catalog/162`) that NBS's own
+  latest published entry is from May 2026 — over six months stale at the
+  time of this run. Zero new rows is the correct, honest result given no
+  new data exists upstream; not a bug.
+- **World Bank RTFP (`commodity_prices_worldbank_rtfp`) — HTML instead of
+  CSV, confirmed structural, not transient.** §19's mitigation already
+  detected and refused to parse the HTML page it was getting; this round
+  went further and live-confirmed *why*: the catalog page's download link
+  (`microdata.worldbank.org/catalog/4503/data-dictionary`) no longer
+  resolves to a raw CSV at all — it leads to a "Get Microdata" page, a
+  request-access/terms step, not a file. This is the same structural
+  failure mode §19 and this ingestor's own header comment in
+  `worldbank-rtfp-backfill.ts` had already anticipated and recommended
+  handling by converting this domain to manual-entry, the same path
+  already taken for AFEX. No code change made this round — this is a
+  scope decision for the user, not one this round makes unilaterally (see
+  README's Troubleshooting section, updated below, and the open item this
+  investigation reported back to the user).
+- **Food security (HDX HAPI) — `HTTP 429` at `offset=42000`. Confirmed bug,
+  fixed.** The weekly steady-state route
+  (`src/app/api/ingest/food-security/route.ts`) was calling
+  `fetchFoodSecurityBackfillChunk()` — the same unconditional,
+  full-history, up-to-50-page fetch function used by the one-time admin
+  backfill adapter (`getFoodSecurityAdapter()` in
+  `src/lib/ingestion/domain-adapters.ts`) — on every single weekly run,
+  re-paginating through HDX's entire Nigeria food-security history each
+  time until HDX's own rate limiting rejected the request partway through.
+  **Fix:** `fetchAllPages()`
+  (`src/lib/domains/food-security/backfill.ts`) now accepts an optional
+  `startDate`, appending HDX HAPI's own documented `start_date` query
+  parameter (confirmed from HDX's published API reference) when present.
+  A new `fetchFoodSecurityIncrementalChunk(startDate)` export uses it; the
+  weekly route now calls that with a 90-day lookback window (matching
+  NBS's own established `LOOKBACK_DAYS` convention) instead of the
+  full-history function. `fetchFoodSecurityBackfillChunk()` itself is
+  unchanged, so the admin backfill path keeps pulling full history
+  correctly.
+- **Production conditions bulk, direct runner — "operation aborted due to
+  timeout." Confirmed bug, fixed.** `scripts/run-production-conditions-bulk-backfill.ts`
+  exists specifically to move this ingest off Vercel's 60-second
+  `maxDuration` ceiling onto a GitHub Actions runner with no such limit —
+  but it called the shared `fetchProductionConditionsBulkChunk()` with no
+  arguments, silently inheriting that function's 45-second download
+  timeout, tuned for the *other*, Vercel-bound caller. The runner was
+  timing out on FAOSTAT's whole-world, whole-history QCL export despite
+  having no actual time ceiling of its own to respect. **Fix:**
+  `fetchProductionConditionsBulkChunk()` now takes an optional
+  `timeoutMs` parameter (default `45_000`, preserving existing behavior
+  for the Vercel route and the admin manual-upload fallback); the direct
+  script now passes `600_000` (10 minutes) — generous against this
+  export's size and the job's actual 360-minute GitHub Actions default,
+  while still failing fast rather than hanging indefinitely if FAOSTAT
+  itself stalls.
+
+**Proof.** `npx tsc --noEmit`, `npx eslint`, and the full `npx vitest run`
+suite (329 tests, 27 files) all pass unchanged after both fixes; a full
+`next build` production build also completed cleanly. No new tests were
+added for the two fixed functions, consistent with this codebase's
+established pattern of not unit-testing live-fetch functions themselves
+(only their pure parsing/logic counterparts, which were untouched here).
+
 ## What is out of scope
 
 - **DDoS / network-layer abuse** — left to Vercel's platform-level

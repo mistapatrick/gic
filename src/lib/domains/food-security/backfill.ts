@@ -96,9 +96,26 @@ function extractRecords(responseJson: unknown): Array<Record<string, unknown>> {
   );
 }
 
-async function fetchAllPages(appIdentifier: string): Promise<Array<Record<string, unknown>>> {
+/**
+ * startDate (HDX HAPI's own `start_date` query param — confirmed from its
+ * published API reference, docs.humdata.org/build/hdx-apis/hapi/api-reference
+ * /food-security-nutrition-and-poverty: "includes rows whose reference
+ * period overlaps with or extends beyond this date") is optional and
+ * narrows the request server-side when given. Left undefined, this pulls
+ * HDX's ENTIRE Nigeria food-security history — correct for a one-time
+ * backfill, but confirmed in production (2026-11-28) to paginate deep
+ * enough (40+ sequential requests at PAGE_LIMIT=1000) to trip HDX's own
+ * rate limiting (HTTP 429) partway through, when called unconditionally
+ * every week by the steady-state cron. See fetchFoodSecurityIncrementalChunk
+ * below for the weekly route's own narrower caller.
+ */
+async function fetchAllPages(
+  appIdentifier: string,
+  startDate?: string
+): Promise<Array<Record<string, unknown>>> {
   const all: Array<Record<string, unknown>> = [];
   let offset = 0;
+  const startDateParam = startDate ? `&start_date=${encodeURIComponent(startDate)}` : "";
 
   // Unconditional pagination loop per HDX's own documented guidance (see
   // this file's header comment) — stops once a page returns fewer rows
@@ -108,7 +125,7 @@ async function fetchAllPages(appIdentifier: string): Promise<Array<Record<string
     const url =
       `${HAPI_BASE}/api/v2/food-security-nutrition-poverty/food-security` +
       `?location_code=NGA&output_format=json&limit=${PAGE_LIMIT}&offset=${offset}` +
-      `&app_identifier=${encodeURIComponent(appIdentifier)}`;
+      `${startDateParam}&app_identifier=${encodeURIComponent(appIdentifier)}`;
     const json = await fetchJson(url, 30_000);
     const records = extractRecords(json);
     all.push(...records);
@@ -122,6 +139,28 @@ async function fetchAllPages(appIdentifier: string): Promise<Array<Record<string
 export async function fetchFoodSecurityBackfillChunk(): Promise<Array<Record<string, unknown>>> {
   const appIdentifier = await getAppIdentifier();
   return fetchAllPages(appIdentifier);
+}
+
+/**
+ * The weekly steady-state route's own fetch — deliberately NOT
+ * fetchFoodSecurityBackfillChunk(). That function pulls HDX's entire
+ * history unconditionally, which is correct for the one-time admin
+ * backfill but wrong for a cron that runs every week: on 2026-11-28 a real
+ * production run of the weekly route (which was calling
+ * fetchFoodSecurityBackfillChunk() directly) failed with HTTP 429 at
+ * offset 42000 — HDX's own rate limiting, tripped by re-paginating through
+ * tens of thousands of historical rows every single week instead of only
+ * checking what's new. startDate narrows the request server-side via
+ * HDX's own start_date param (see fetchAllPages's comment above), the same
+ * lookback-window pattern NBS's and production_conditions' own weekly
+ * routes already use — idempotent upsert makes re-checking a short window
+ * on every run harmless, same as everywhere else in this codebase.
+ */
+export async function fetchFoodSecurityIncrementalChunk(
+  startDate: string
+): Promise<Array<Record<string, unknown>>> {
+  const appIdentifier = await getAppIdentifier();
+  return fetchAllPages(appIdentifier, startDate);
 }
 
 export function parseFoodSecurityBackfillChunk(

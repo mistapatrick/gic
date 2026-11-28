@@ -127,30 +127,29 @@ export function extractCsvRowsFromZipOrCsv(buffer: Buffer): BulkCsvRow[] {
   }) as BulkCsvRow[];
 }
 
-export async function fetchProductionConditionsBulkChunk(): Promise<BulkCsvRow[]> {
+/**
+ * timeoutMs defaults to 45s, matching every other "big download" call in
+ * this codebase (production_conditions' own live-query fetch, NBS's ZIP,
+ * World Bank's CSV) and the Vercel route's own maxDuration = 60 budget —
+ * see route.ts for why 60s is a hard ceiling for THAT caller (Vercel
+ * Hobby/free tier), not a value this app chose for every caller.
+ *
+ * Confirmed in production on 2026-11-28: the GitHub-Actions-direct runner
+ * (scripts/run-production-conditions-bulk-backfill.ts), which exists
+ * specifically to escape Vercel's 60s ceiling, was still inheriting this
+ * same 45s download timeout and timing out on this whole-world,
+ * whole-history export (every country, every year, one domain —
+ * meaningfully larger than any other single download in this codebase).
+ * That caller now passes a much longer value (see its own call site);
+ * the Vercel route and the admin manual-upload fallback keep the default.
+ */
+export async function fetchProductionConditionsBulkChunk(
+  timeoutMs = 45_000
+): Promise<BulkCsvRow[]> {
   const downloadUrl = await resolveBulkDownloadUrl();
   const res = await fetch(downloadUrl, {
     cache: "no-store",
-    // 45s, matching every other "big download" call in this codebase
-    // (production_conditions' own live-query fetch, NBS's ZIP, World
-    // Bank's CSV) and the route's own maxDuration = 60 budget — see
-    // route.ts for why 60s is a hard ceiling here (Vercel Hobby/free
-    // tier), not a value this app chose. This file is a whole-world,
-    // whole-history export (every country, every year, one domain) —
-    // meaningfully larger than any other single download in this
-    // codebase — so 45s may not be enough; there is no live deployment
-    // to measure it against from this sandbox. If this route's own
-    // last_error ever shows a timeout here, that is real evidence this
-    // guess was wrong, in which case the fix is almost certainly moving
-    // this fetch+parse+write off the Vercel request/response cycle
-    // entirely (e.g. running it directly on the GitHub Actions runner,
-    // which has no 60s ceiling) rather than raising this number again —
-    // the live-query route already went through two rounds of "raise the
-    // timeout" before the real problem turned out to be the endpoint
-    // itself, and a merely-bigger number has the same failure mode here
-    // if the file is too large for a serverless function regardless of
-    // how long it's allowed to run.
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: GIC_OUTBOUND_HEADERS,
   });
   if (!res.ok) {

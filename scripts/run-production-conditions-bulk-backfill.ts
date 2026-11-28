@@ -64,7 +64,16 @@ async function main() {
   }
 
   console.log("Resolving FAOSTAT's current bulk-download URL and fetching the file...");
-  const csvRows = await fetchProductionConditionsBulkChunk();
+  // This runner has no Vercel-style 60s ceiling (the whole reason this
+  // script exists — see header comment), but fetchProductionConditionsBulkChunk
+  // still defaulted to the 45s timeout tuned for that OTHER caller until a
+  // real run here timed out ("The operation was aborted due to timeout",
+  // 2026-11-28) despite running on a runner with none of that constraint.
+  // 10 minutes is generous for FAOSTAT's whole-world, whole-history QCL
+  // export against this job's actual ceiling (GitHub Actions' own default
+  // of 360 minutes), while still failing fast rather than hanging forever
+  // if FAOSTAT itself is unresponsive.
+  const csvRows = await fetchProductionConditionsBulkChunk(600_000);
   console.log(`Downloaded and parsed ${csvRows.length} raw CSV rows.`);
 
   const { rows, skippedCommodities } = parseProductionConditionsBulkChunkWithDiagnostics(csvRows);
