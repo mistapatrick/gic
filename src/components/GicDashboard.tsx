@@ -152,6 +152,24 @@ export default function GicDashboard({
     return report.cluster_metrics.filter((c) => c.geo_zone === selectedZone);
   }, [report, selectedZone]);
 
+  // Per-zone cluster counts for the zone-button labels below, computed from
+  // the live cluster list rather than hardcoded. Fixed 2026-11-27: migration
+  // 0010 added 2 clusters each to North-West and North-Central and 1 to
+  // South-South (uneven — these were the 3 states-with-no-cluster gaps the
+  // user asked to fill), so every zone no longer has exactly 4. A literal
+  // "(4)" on every button, and a literal "(24)" on "All Zones", had gone
+  // stale the moment that migration ran — this computes both from
+  // `report.cluster_metrics` so a future cluster addition can't silently
+  // make these labels lie again.
+  const zoneCounts = useMemo<Record<string, number>>(() => {
+    const counts: Record<string, number> = {};
+    for (const c of report?.cluster_metrics ?? []) {
+      counts[c.geo_zone] = (counts[c.geo_zone] ?? 0) + 1;
+    }
+    return counts;
+  }, [report]);
+  const totalClusterCount = report?.cluster_metrics.length ?? 0;
+
   // Derived rather than effect-synced: if the selected slug isn't in the
   // current zone filter (e.g. the user just switched zones), fall back to
   // the first cluster in that zone for rendering, without needing a
@@ -283,8 +301,8 @@ export default function GicDashboard({
         <section className="rounded-xl border border-brand-grey-green bg-brand-white p-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-brand-ink-soft">
             <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-teal" />
-            Nigeria-wide — 29 agricultural clusters across all 6 geopolitical zones. Tap a zone to
-            explore it:
+            Nigeria-wide — {totalClusterCount} agricultural clusters across all 6 geopolitical
+            zones. Tap a zone to explore it:
           </p>
           <div className="flex flex-wrap gap-1.5">
             <button
@@ -297,7 +315,7 @@ export default function GicDashboard({
                   : "border border-brand-grey-green bg-brand-white text-brand-ink-soft hover:bg-brand-mint-pale"
               }`}
             >
-              All Zones (24)
+              All Zones ({totalClusterCount})
             </button>
             {GEO_ZONES.map((z) => (
               <button
@@ -311,7 +329,7 @@ export default function GicDashboard({
                     : "border border-brand-grey-green bg-brand-white text-brand-ink-soft hover:bg-brand-mint-pale"
                 }`}
               >
-                {z.replace("-", " ")} (4)
+                {z.replace("-", " ")} ({zoneCounts[z] ?? 0})
               </button>
             ))}
           </div>
@@ -381,10 +399,20 @@ export default function GicDashboard({
           )}
 
           {/* Horizontal touch-friendly cluster pills for the zone(s) chosen
-              above — at most 4 when one zone is selected (fits on screen,
-              no scrolling needed), only scrollable at all when "All Zones"
-              shows all 24, and a visible hint says so rather than leaving
-              it to be discovered by accident. */}
+              above. Originally assumed every single zone had exactly 4
+              clusters (always fits, no scrolling needed) and only "All
+              Zones" (24, now 29) could ever need scrolling — so the hint
+              below fired on a hardcoded `> 6` pill count, a proxy for "All
+              Zones is selected". Fixed 2026-11-27: migration 0010 made that
+              assumption false for 3 zones (North-West and North-Central now
+              have 6 each, South-South has 5), so the hint was silently not
+              appearing for those zones even though their pills could still
+              overflow a narrow screen. The threshold is now `> 4` — the
+              original, verified "always fits" ceiling — so any zone (or
+              "All Zones") exceeding it gets the same scroll affordance. The
+              hint text also no longer suggests "pick a single zone above"
+              when a single zone is already selected and still overflowing;
+              that advice only makes sense from the "All Zones" view. */}
           <div className="relative mt-3">
             <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
               {clusters.map((c) => {
@@ -405,14 +433,16 @@ export default function GicDashboard({
                 );
               })}
             </div>
-            {clusters.length > 6 && (
+            {clusters.length > 4 && (
               <>
                 <span
                   aria-hidden
                   className="pointer-events-none absolute right-0 top-0 h-full w-8 bg-gradient-to-l from-brand-mint-pale/90 to-transparent"
                 />
                 <p className="mt-1 text-[11px] text-brand-ink-soft">
-                  Scroll or swipe for more clusters, or pick a single zone above →
+                  {selectedZone === "ALL"
+                    ? "Scroll or swipe for more clusters, or pick a single zone above →"
+                    : "Scroll or swipe for more clusters →"}
                 </p>
               </>
             )}
