@@ -176,3 +176,47 @@ export function reconcileCommodityPrices(
 
   return results.sort((a, b) => a.commodity.localeCompare(b.commodity));
 }
+
+/**
+ * Compact, per-source recent-history text for one reconciled
+ * (commodity, priceType, unit, currency, region) group — the
+ * commodity_prices equivalent of
+ * production-conditions/brief-logic.ts's buildCompactProductionTelemetry(),
+ * used as the `compactTelemetry` input to
+ * src/lib/scenarios/generate-scenario.ts (Sub-phase 6 Step 2). Pure: takes
+ * whatever observations the caller already fetched for this one group (not
+ * every commodity, unlike reconcileCommodityPrices above) and has no
+ * opinion on how many rows that is or where they came from — a route
+ * handler fetches by (commodity, priceType, unit, currency, region) and
+ * passes the result straight through.
+ *
+ * Grouped by source rather than flattened chronologically, same reasoning
+ * as the production-conditions equivalent: NBS, World Bank RTFP and AFEX
+ * each update on their own cadence, so interleaving them by date would make
+ * a within-source trend harder to read than grouping by source first.
+ */
+const MAX_PERIODS_PER_SOURCE = 4;
+
+export function buildCompactPriceTelemetry(observations: NormalizedPriceObservation[]): string {
+  const bySource = new Map<string, NormalizedPriceObservation[]>();
+  for (const obs of observations) {
+    const list = bySource.get(obs.source) ?? [];
+    list.push(obs);
+    bySource.set(obs.source, list);
+  }
+
+  const lines: string[] = [];
+  for (const [source, obsForSource] of [...bySource.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0])
+  )) {
+    const sorted = [...obsForSource]
+      .sort((a, b) => (a.periodDate < b.periodDate ? 1 : -1))
+      .slice(0, MAX_PERIODS_PER_SOURCE);
+    const figs = sorted
+      .map((o) => `${o.currency} ${o.value.toLocaleString()}/${o.unit} (${o.periodDate})`)
+      .join(", ");
+    lines.push(`${source}: ${figs}`);
+  }
+
+  return lines.join("\n");
+}

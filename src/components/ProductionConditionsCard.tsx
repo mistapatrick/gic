@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, Sprout } from "lucide-react";
+import { Sparkles, Sprout, TrendingUp } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import {
@@ -9,6 +9,8 @@ import {
   getCropCategory,
   getCropEmoji,
 } from "@/lib/domains/production-conditions/crop-emoji";
+import { ScenarioPanel } from "@/components/ScenarioPanel";
+import type { ScenarioSet } from "@/lib/scenarios/scenario-logic";
 
 type ProductionMetric =
   | "production_quantity"
@@ -108,17 +110,57 @@ const SECONDARY_METRICS: Array<{ metric: ProductionMetric; label: string }> = [
  */
 export function ProductionConditionsCard() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [scenariosEnabled, setScenariosEnabled] = useState(false);
   const [rows, setRows] = useState<ProductionRow[]>([]);
   const [brief, setBrief] = useState<ProductionBrief | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Sub-phase 6 Step 2 pilot: at most one commodity's scenario set is ever
+  // in flight or shown at a time — a single "Model scenarios" button click
+  // targets one commodity, the same user-triggered (never automatic)
+  // pattern the feature's own scope calls for. See ScenarioPanel.tsx for
+  // the rendering and /api/scenarios/production-conditions/route.ts for
+  // what this calls.
+  const [activeScenarioCommodity, setActiveScenarioCommodity] = useState<string | null>(null);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [scenarioData, setScenarioData] = useState<ScenarioSet | null>(null);
+
+  async function handleGenerateScenario(commodity: string) {
+    setActiveScenarioCommodity(commodity);
+    setScenarioLoading(true);
+    setScenarioError(null);
+    setScenarioData(null);
+    try {
+      const res = await fetch("/api/scenarios/production-conditions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commodity }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setScenarioError(body.error ?? "Could not model scenarios for this commodity.");
+        return;
+      }
+      setScenarioData(body as ScenarioSet);
+    } catch {
+      setScenarioError("Could not reach the scenario modeling service.");
+    } finally {
+      setScenarioLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      const flagOn = await isFeatureEnabled("production_conditions");
+      const [flagOn, scenariosFlagOn] = await Promise.all([
+        isFeatureEnabled("production_conditions"),
+        isFeatureEnabled("production_conditions_scenarios"),
+      ]);
       if (cancelled) return;
       setEnabled(flagOn);
+      setScenariosEnabled(scenariosFlagOn);
       if (!flagOn) return;
 
       try {
@@ -275,6 +317,21 @@ export function ProductionConditionsCard() {
               )}
             </section>
 
+            {/* Sub-phase 6 Step 2 pilot — hidden entirely while
+                feature_flags.production_conditions_scenarios is false, same
+                cautious-default pattern as every other domain flag. Shown
+                right after the AI synthesis panel so it's visible without
+                scrolling past the (potentially long) per-category grid
+                below, regardless of which commodity's button was clicked. */}
+            {scenariosEnabled && activeScenarioCommodity && (
+              <ScenarioPanel
+                commodity={activeScenarioCommodity}
+                loading={scenarioLoading}
+                error={scenarioError}
+                scenario={scenarioData}
+              />
+            )}
+
             {CROP_CATEGORIES.map((category) => {
               const items = byCategory.get(category);
               if (!items || items.length === 0) return null;
@@ -285,7 +342,13 @@ export function ProductionConditionsCard() {
                   </h3>
                   <div className="mt-2 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
                     {items.map((card) => (
-                      <CommodityCard key={card.commodity} card={card} />
+                      <CommodityCard
+                        key={card.commodity}
+                        card={card}
+                        scenariosEnabled={scenariosEnabled}
+                        scenarioLoading={scenarioLoading}
+                        onGenerateScenario={handleGenerateScenario}
+                      />
                     ))}
                   </div>
                 </section>
@@ -298,7 +361,17 @@ export function ProductionConditionsCard() {
   );
 }
 
-function CommodityCard({ card }: { card: CommodityCardData }) {
+function CommodityCard({
+  card,
+  scenariosEnabled,
+  scenarioLoading,
+  onGenerateScenario,
+}: {
+  card: CommodityCardData;
+  scenariosEnabled: boolean;
+  scenarioLoading: boolean;
+  onGenerateScenario: (commodity: string) => void;
+}) {
   return (
     <div className="rounded-xl border border-brand-grey-green bg-brand-white p-3">
       <div className="flex items-center gap-1.5">
@@ -317,6 +390,17 @@ function CommodityCard({ card }: { card: CommodityCardData }) {
           {stat.label}: {stat.value.toLocaleString()} {stat.unit}
         </div>
       ))}
+      {scenariosEnabled && (
+        <button
+          type="button"
+          onClick={() => onGenerateScenario(card.commodity)}
+          disabled={scenarioLoading}
+          className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-brand-teal/30 bg-brand-mint-pale/60 px-2 py-1 text-[10px] font-semibold text-brand-teal-dark transition hover:bg-brand-mint-pale disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <TrendingUp className="h-3 w-3" aria-hidden="true" />
+          Model scenarios
+        </button>
+      )}
     </div>
   );
 }

@@ -1004,6 +1004,64 @@ anything undocumented; exactly `production_conditions` and
 `commodity_prices` declare a manual-entry counterpart; and the help text
 names every domain and the three core flags.
 
+## 22. Rate limiting & defense-in-depth on the scenario-generation routes
+
+**Threat.** `/api/scenarios/production-conditions` and
+`/api/scenarios/commodity-prices` (Sub-phase 6 Step 2) are the first
+*write-triggering*, user-initiated AI-generation surface in this codebase.
+Every earlier AI call (`/api/chat`, the production-conditions and
+commodity-prices briefs) is read-only — a bad actor can waste AI quota but
+never write anything. These two routes insert rows into
+`scenario_predictions` on every successful call, so an abusive client could
+both exhaust the free-tier AI quota *and* flood the table with junk
+scenario sets.
+
+**Mitigation.**
+- **Reused, not duplicated, rate limiting.** Both routes call the same
+  `checkRateLimit()` / `getClientKey()` pair from `src/lib/rate-limit.ts`
+  already used by `/api/chat` and `/api/export` (§7) — a fixed
+  5-requests-per-10-minutes window per client key, `429` with
+  `Retry-After` on the 6th request. The window is tighter than `/api/chat`'s
+  10-per-60s because each call here is more expensive (an AI generation
+  *and* three subsequent database writes) and user-triggered rather than
+  page-load-triggered, so legitimate use needs far fewer requests per
+  session.
+- **Server-side feature-flag recheck, not UI-trust.** Both routes call
+  `isFeatureEnabled()` themselves before doing anything else and return
+  `403` if the relevant flag (`production_conditions_scenarios` /
+  `commodity_prices_scenarios`) is off — identical to every other
+  feature-flagged domain in this codebase. The "Model scenarios" button
+  being hidden in the UI is a convenience, never the enforcement boundary;
+  a client that discovers the route URL directly still hits the same
+  flag check.
+- **Zod-validated request bodies**, matching the exact grouping keys the
+  domain already uses: `commodity` alone for production conditions, and
+  the full five-field reconciliation key (`commodity`, `priceType`,
+  `unit`, `currency`, `region`) for commodity prices — so a request can't
+  generate a scenario against a nonexistent or ambiguously-merged group
+  (see §20's reconciliation-integrity discussion for why that key, and no
+  smaller one, identifies a single real reconciled series).
+- **Persistence failure is a deliberate hard error (`500`), not graceful
+  degradation.** This is the one place in the codebase where an AI-call
+  failure is handled *less* permissively than the read-only brief routes
+  (§8): a generated-but-unpersisted scenario would silently defeat
+  Sub-phase 6 Step 2's entire purpose, since Step 3/4's adaptation and
+  resolution-tracking work depends on every generated scenario set
+  actually existing in `scenario_predictions`. A scenario is only ever
+  shown to the user after all three branch rows are confirmed written.
+- **Resolution-horizon dates are computed, never user-supplied.** The
+  `target_resolution_date`/`resolution_metric` values persisted alongside
+  each scenario come from `src/lib/scenarios/resolution-horizon.ts` — a
+  pure function of the server's own clock and the domain, with no request
+  input influencing them — closing off a class of bug where a malformed
+  or adversarial date could land in a downstream Step 3/4 query.
+
+**Proof.** `tests/resolution-horizon.test.ts` covers both domains' date
+math (including month/year rollover) deterministically. The existing
+`tests/rate-limit.test.ts` (§7) already proves `checkRateLimit()`'s
+window/reset/per-key-isolation behavior, which both new routes depend on
+unchanged.
+
 ## What is out of scope
 
 - **DDoS / network-layer abuse** — left to Vercel's platform-level

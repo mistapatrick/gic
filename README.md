@@ -298,6 +298,16 @@ growthly-gic/
       bringing the total from 24 to 29. New clusters get nightly ingestion
       automatically; their historical weather still needs one manual
       backfill run each from the admin Backfill panel.
+   12. [`supabase/migrations/0011_geo_intelligence_and_crop_calendar_flags.sql`](./supabase/migrations/0011_geo_intelligence_and_crop_calendar_flags.sql)
+      — seeds the `geo_intelligence` and `crop_calendar` feature flags
+      (both `false`). Both domains are schema-free additions (they read
+      existing weather/production/price tables only), so this migration is
+      the only database change either one needs.
+   13. [`supabase/migrations/0012_scenario_pilot_feature_flags.sql`](./supabase/migrations/0012_scenario_pilot_feature_flags.sql)
+      — seeds the `production_conditions_scenarios` and
+      `commodity_prices_scenarios` feature flags (both `false`) for
+      Sub-phase 6 Step 2's "Business Scenarios" pilot. Needed before either
+      flag can be flipped on in Step 8 below.
 3. **Authentication → Providers**: confirm Email is enabled (it is by
    default). **Authentication → URL Configuration**: set the Site URL to
    your eventual production domain once you have it (Step 4).
@@ -451,6 +461,48 @@ No new secrets needed — the new weekly crons all reuse the same
    and they'll show up on the dashboard card alongside the automated
    NBS/World Bank RTFP figures — averaged with each other, never with
    AFEX's exchange-spot price (see "What's in it" above for why).
+
+### Step 8 — Activate the Sub-phase 6 Step 2 scenario pilot
+
+No new secrets or crons here — this is a pilot of two feature-flagged,
+user-triggered "Model scenarios" buttons, not a scheduled ingest.
+
+1. Migration 0012 (already applied if you ran every migration from Step 1
+   in order) seeds two new flags, both `false`:
+   `production_conditions_scenarios` and `commodity_prices_scenarios`.
+   Each gates one domain's "Model scenarios" button independently — you
+   can pilot one domain without the other.
+2. **Before flipping either flag on, do a real live-environment test
+   first**, the same discipline as Step 7 item 4 above. With the flag
+   still `false`, the button is hidden from ordinary visitors, but you
+   (as `super_admin` or any account with access to that domain's card)
+   can temporarily set the flag `true` in Supabase's **Table Editor →
+   feature_flags**, load the dashboard, click **Model scenarios** on one
+   commodity (production conditions) or one reconciled price group
+   (commodity prices), and confirm:
+   - the three scenario branches (do-nothing / option A / option B) render
+     with a narrative, a confidence label, and — where applicable — a
+     predicted range;
+   - a new row for each of the three branches appears in Supabase's
+     `scenario_predictions` table (**Table Editor → scenario_predictions**),
+     stamped with the correct `domain`, `commodity`, and
+     `resolution_metric`;
+   - clicking the button again shortly after returns a fast, clear `429`
+     (rate limited) rather than silently doing nothing — both new routes
+     allow 5 generations per 10 minutes per client, the same budget as
+     `/api/chat`.
+3. If a click ever fails, the error banner names what went wrong (no
+   matching data for that commodity/group, the AI provider chain being
+   unavailable, or a database write failure) rather than failing silently
+   — see `SECURITY.md` §22 for exactly what each new route checks and why
+   a failed `scenario_predictions` write is treated as a hard error
+   instead of still showing the scenario.
+4. Once verified, flip `production_conditions_scenarios` and/or
+   `commodity_prices_scenarios` to `enabled = true` to make the button
+   visible to everyone who can already see that domain's card. Each flag
+   is independent of its domain's main display flag from Step 7 — a
+   domain can be visible with scenarios still hidden, which is the
+   intended pilot state until you've done the check in item 2 above.
 
 ## Accounts, roles & admin
 

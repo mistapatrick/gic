@@ -3,6 +3,7 @@ import {
   reconcileCommodityPrices,
   priceTypeForSource,
   normalizeManualCommodityEntry,
+  buildCompactPriceTelemetry,
   type NormalizedPriceObservation,
 } from "@/lib/domains/commodity-prices/price-types";
 
@@ -109,5 +110,43 @@ describe("reconcileCommodityPrices", () => {
       obs({ commodity: "Cowpeas", source: "NBS", value: 700 }),
     ]);
     expect(result.map((g) => g.commodity)).toEqual(["Cowpeas", "Yams"]);
+  });
+});
+
+describe("buildCompactPriceTelemetry", () => {
+  it("groups observations by source, sorted alphabetically", () => {
+    const text = buildCompactPriceTelemetry([
+      obs({ commodity: "Maize", source: "WORLD_BANK_RTFP", value: 500, periodDate: "2026-11-01" }),
+      obs({ commodity: "Maize", source: "NBS", value: 480, periodDate: "2026-11-01" }),
+    ]);
+    const nbsLine = text.split("\n").findIndex((l) => l.startsWith("NBS:"));
+    const wbLine = text.split("\n").findIndex((l) => l.startsWith("WORLD_BANK_RTFP:"));
+    expect(nbsLine).toBeGreaterThanOrEqual(0);
+    expect(wbLine).toBeGreaterThan(nbsLine);
+  });
+
+  it("sorts each source's own periods newest-first and caps at 4", () => {
+    const text = buildCompactPriceTelemetry([
+      obs({ commodity: "Maize", source: "NBS", value: 100, periodDate: "2026-07-01" }),
+      obs({ commodity: "Maize", source: "NBS", value: 200, periodDate: "2026-09-01" }),
+      obs({ commodity: "Maize", source: "NBS", value: 300, periodDate: "2026-08-01" }),
+      obs({ commodity: "Maize", source: "NBS", value: 400, periodDate: "2026-10-01" }),
+      obs({ commodity: "Maize", source: "NBS", value: 500, periodDate: "2026-11-01" }),
+    ]);
+    const nbsLine = text.split("\n").find((l) => l.startsWith("NBS:"))!;
+    // newest-first, and only 4 of the 5 periods kept
+    expect(nbsLine.indexOf("2026-11-01")).toBeLessThan(nbsLine.indexOf("2026-10-01"));
+    expect(nbsLine).not.toContain("2026-07-01");
+  });
+
+  it("includes currency, value and unit per period", () => {
+    const text = buildCompactPriceTelemetry([
+      obs({ commodity: "Rice", source: "NBS", value: 1234.5, unit: "NGN per kg", currency: "NGN", periodDate: "2026-11-01" }),
+    ]);
+    expect(text).toContain("NGN 1,234.5/NGN per kg (2026-11-01)");
+  });
+
+  it("returns an empty string for no observations", () => {
+    expect(buildCompactPriceTelemetry([])).toBe("");
   });
 });
